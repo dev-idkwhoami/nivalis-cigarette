@@ -1,0 +1,22 @@
+# Generated binaries, packages and local dependency caches
+**/bin/
+**/obj/
+dist/
+.tools/
+
+# Local test captures and backup builds
+backups/
+diagnostics/
+*.log
+
+# Editor and agent state
+.vs/
+.vscode/
+.idea/
+.agents/
+.codex/
+**/__pycache__/
+*.pyc
+.env
+.env.*
+.DS_Store

@@ -1,0 +1,8 @@
+<Project>
+  <!-- Uses the .NET SDK's built-in ZIP task; no external archiver is needed. -->
+  <Target Name="Package">
+    <Error Condition="'$(PackageSource)' == '' or '$(PackageArchive)' == ''"
+           Text="Invoke packaging through make package." />
+    <ZipDirectory SourceDirectory="$(PackageSource)" DestinationFile="$(PackageArchive)" />
+  </Target>
+</Project>

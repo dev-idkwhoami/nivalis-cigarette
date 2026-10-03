@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputPath>bin/</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../src/HandMotion.cs" Link="HandMotion.cs" />
+    <Compile Include="../src/SmokingSession.cs" Link="SmokingSession.cs" />
+    <Compile Include="../src/BreathRecording.cs" Link="BreathRecording.cs" />
+    <EmbeddedResource Include="../assets/*.wav" LogicalName="Cigarette.Audio.%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

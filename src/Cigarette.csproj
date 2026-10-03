@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Nivalis.Cigarette</AssemblyName>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="../assets/*.wav" LogicalName="Cigarette.Audio.%(Filename)%(Extension)" />
+    <Reference Include="0Harmony" HintPath="$(GamePath)/BepInEx/core/0Harmony.dll" Private="false" />
+    <Reference Include="BepInEx.Core" HintPath="$(GamePath)/BepInEx/core/BepInEx.Core.dll" Private="false" />
+    <Reference Include="BepInEx.Unity.IL2CPP" HintPath="$(GamePath)/BepInEx/core/BepInEx.Unity.IL2CPP.dll" Private="false" />
+    <Reference Include="Il2CppInterop.Runtime" HintPath="$(GamePath)/BepInEx/core/Il2CppInterop.Runtime.dll" Private="false" />
+    <Reference Include="$(GamePath)/BepInEx/interop/*.dll" Private="false" />
+  </ItemGroup>
+</Project>
