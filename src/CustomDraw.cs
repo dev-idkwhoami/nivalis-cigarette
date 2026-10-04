@@ -25,19 +25,22 @@ internal sealed class CustomDraw
     private readonly Quaternion _supportRotation;
     private readonly Transform _hand, _forearm, _eye, _cigarette;
     private readonly Quaternion _handFrame;
+    private readonly Quaternion _neutralWrist;
     private readonly Quaternion _bodyRotation;
     private readonly Vector3 _restPosition;
     private readonly Quaternion _restRotation;
     private readonly List<(Transform Bone, Quaternion Relaxed, Quaternion Draw)> _grip = new();
     private readonly float _start;
+    private float Clock => _mask ? Time.unscaledTime : Time.time;
     private readonly SmokingSession _session;
+    private readonly bool _mask;
     private int _drawIndex;
     private bool _exiting;
     private float _exitStarted, _exitBurn;
     private Vector3 _exitHand, _exitSupport;
     private Quaternion _exitHandRotation, _exitSupportRotation;
     private readonly Transform _supportHand;
-    internal float BurnProgress => _exiting ? _exitBurn : _session.BurnProgress(Time.time - _start);
+    internal float BurnProgress => _exiting ? _exitBurn : _session.BurnProgress(Clock - _start);
     internal float ExitProgress => _exiting ? Mathf.Clamp01((Time.unscaledTime - _exitStarted) / 0.85f) : 0f;
     private ExhaleSmoke? _smoke;
     private bool _smokeUnavailable;
@@ -49,9 +52,10 @@ internal sealed class CustomDraw
 #endif
     private float _exhaleDuration = UnityEngine.Random.Range(1f, 2.5f);
 
-    internal CustomDraw(PlayerHandsAnimator hands, Transform eye, Transform cigarette, Quaternion bodyRotation, PlayerCharacter character, SmokingSession session, RaycastHit railTop)
+    internal CustomDraw(PlayerHandsAnimator hands, Transform eye, Transform cigarette, Quaternion bodyRotation, PlayerCharacter character, SmokingSession session, RaycastHit railTop, SmokeKind kind)
     {
         _session = session;
+        _mask = kind == SmokeKind.Mask;
         _bodyOrigin = character.transform.position;
         _railNearDepth = Vector3.Dot(railTop.point - _bodyOrigin, bodyRotation * Vector3.forward);
         var left = false;
@@ -74,13 +78,18 @@ internal sealed class CustomDraw
         _eyeAtStart = eye.position;
         _hand = hands.Animator.GetBoneTransform(left ? HumanBodyBones.LeftHand : HumanBodyBones.RightHand);
         _forearm = hands.Animator.GetBoneTransform(left ? HumanBodyBones.LeftLowerArm : HumanBodyBones.RightLowerArm);
+        _neutralWrist = Quaternion.Inverse(_forearm.rotation) * _hand.rotation;
         _supportHand = hands.Animator.GetBoneTransform(left ? HumanBodyBones.RightHand : HumanBodyBones.LeftHand);
         _eye = eye;
         _cigarette = cigarette;
         _bodyRotation = bodyRotation;
-        BuildGrip(hands.Animator, left);
-        ApplyGrip(0f);
-        CloseCigaretteGrip(hands.Animator, left);
+        if (_mask) BuildMaskGrip(hands.Animator, left);
+        else BuildGrip(hands.Animator, left);
+        if (!_mask)
+        {
+            ApplyGrip(0f);
+            CloseCigaretteGrip(hands.Animator, left);
+        }
         var index = hands.Animator.GetBoneTransform(left ? HumanBodyBones.LeftIndexIntermediate : HumanBodyBones.RightIndexIntermediate);
         var middle = hands.Animator.GetBoneTransform(left ? HumanBodyBones.LeftMiddleIntermediate : HumanBodyBones.RightMiddleIntermediate);
         var indexDistal = hands.Animator.GetBoneTransform(left ? HumanBodyBones.LeftIndexDistal : HumanBodyBones.RightIndexDistal);
@@ -98,7 +107,10 @@ internal sealed class CustomDraw
         _supportRotation = desiredRest * Quaternion.Inverse(supportFrame);
         _supportPosition = eye.position + bodyRotation * new Vector3(-_side * 0.24f, -0.46f, 0.28f);
         // Anchor both hands to the selected rail. A miss on one side must not discard the other contact.
-        var wristOffset = Vector3.up * 0.045f;
+        if (_mask)
+            _restRotation = Quaternion.LookRotation(bodyRotation * Vector3.forward,
+                (-_side * (bodyRotation * Vector3.right) + Vector3.up * 0.35f).normalized) * Quaternion.Inverse(handFrame);
+        var wristOffset = Vector3.up * (_mask ? 0.115f : 0.045f);
         _supportPose = new SupportHandPose(hands.Animator, _supportRotation);
         var palmOffset = _supportPose.ContactOffset;
         if (TryRailTop(character, hands, bodyRotation, _side * 0.22f, railTop, _arm, _shoulder != null, true, wristOffset, out var restContact, out var rightNearEdge, out _))
@@ -119,11 +131,24 @@ internal sealed class CustomDraw
         // Choose the cigarette roll so fingers run sideways at the mouth, instead of bending the wrist backwards.
         var frameWorld = _hand.rotation * handFrame;
         _cigarette.rotation = Quaternion.LookRotation(-(frameWorld * Vector3.up), frameWorld * Vector3.forward);
-        // Hold near the filter's mouth end: about 3 mm projects past the inner finger surface.
-        _cigarette.position = gripPoint + _cigarette.forward * 0.010f;
-        try { _audio = new BreathAudio(eye); }
+        if (_mask)
+        {
+            var ring = hands.Animator.GetBoneTransform(HumanBodyBones.RightRingIntermediate);
+            // Canister passes between middle/ring fingers; bowl sits above the palm.
+            gripPoint = (middle.position + ring.position) * 0.5f;
+            _cigarette.position = gripPoint - _cigarette.rotation * MaskModel.GripPoint;
+            // Anchor using the previous grip before opening the fingers, so the
+            // mask and wrist keep their established positions.
+            ApplyGrip(0f);
+        }
+        else
+        {
+            // Hold near the filter's mouth end: about 3 mm past the inner finger surface.
+            _cigarette.position = gripPoint + _cigarette.forward * 0.010f;
+        }
+        try { _audio = new BreathAudio(eye, _mask); }
         catch (Exception e) { Plugin.Logger.LogWarning("Breath audio unavailable: " + e.Message); }
-        _start = Time.time;
+        _start = Clock;
     }
 
     private void BuildGrip(Animator animator, bool left)
@@ -149,6 +174,56 @@ internal sealed class CustomDraw
             _grip.Add((bone, bone.localRotation * Quaternion.AngleAxis(restAngle, axis),
                 bone.localRotation * Quaternion.AngleAxis(drawAngle, axis)));
         }
+    }
+
+    private void BuildMaskGrip(Animator animator, bool left)
+    {
+        Transform Bone(string finger, string joint) => animator.GetBoneTransform(
+            Enum.Parse<HumanBodyBones>((left ? "Left" : "Right") + finger + joint));
+        var palm = PalmNormal(animator, left);
+        var openingCorrections = new Dictionary<int, Quaternion>();
+        // Preserve the original curls for model placement; apply per-finger
+        // opening only after anchoring the mask, without mesh fitting.
+        foreach (var (finger, first, second, opening) in new[] { ("Index", 42f, 18f, 0.15f),
+            ("Middle", 32f, 12f, 0.25f), ("Ring", 34f, 14f, 0.50f),
+            ("Little", 44f, 20f, 0.55f), ("Thumb", 35f, 12f, 0.20f) })
+        {
+            var proximal = Bone(finger, "Proximal");
+            var intermediate = Bone(finger, "Intermediate");
+            var distal = Bone(finger, "Distal");
+            var direction = finger == "Thumb"
+                ? (Bone("Middle", "Proximal").position - proximal.position + palm * 0.03f).normalized : palm;
+            Curl(proximal, intermediate.position - proximal.position, first, direction, opening);
+            Curl(intermediate, distal.position - intermediate.position, second, direction, opening);
+            // Keep the last joint in its neutral pose so the pad lies along the shell.
+        }
+        // Open a canister-sized gap by splaying at the knuckles, without losing curl.
+        for (var iteration = 0; iteration < 6; iteration++)
+        {
+            var middle = Bone("Middle", "Intermediate");
+            var ring = Bone("Ring", "Intermediate");
+            var delta = ring.position - middle.position;
+            if (Mathf.Abs(delta.magnitude - 0.025f) < 0.0005f) break;
+            var center = (middle.position + ring.position) * 0.5f;
+            var halfGap = delta.normalized * 0.0125f;
+            Aim(Bone("Middle", "Proximal"), middle.position, center - halfGap);
+            Aim(Bone("Ring", "Proximal"), ring.position, center + halfGap);
+        }
+        foreach (var finger in new[] { "Index", "Middle", "Ring", "Little", "Thumb" })
+        foreach (var joint in new[] { "Proximal", "Intermediate", "Distal" })
+        {
+            var bone = Bone(finger, joint);
+            var pose = bone.localRotation * openingCorrections.GetValueOrDefault(bone.GetInstanceID(), Quaternion.identity);
+            _grip.Add((bone, pose, pose));
+        }
+        void Curl(Transform bone, Vector3 direction, float angle, Vector3 palm, float opening)
+        {
+            var axis = bone.InverseTransformDirection(Vector3.Cross(direction, palm).normalized);
+            bone.localRotation *= Quaternion.AngleAxis(angle, axis);
+            openingCorrections[bone.GetInstanceID()] = Quaternion.AngleAxis(-angle * opening, axis);
+        }
+        static void Aim(Transform bone, Vector3 from, Vector3 to) =>
+            bone.rotation = Quaternion.FromToRotation(from - bone.position, to - bone.position) * bone.rotation;
     }
 
     private void CloseCigaretteGrip(Animator animator, bool left)
@@ -223,6 +298,7 @@ internal sealed class CustomDraw
             _eyeAtStart + _bodyRotation * new Vector3(_side * 0.38f, -0.48f, 0.04f), weight);
         _supportArm.Solve(ExitPosition(_exitSupport, _exitSupportRetract, supportLowered, phases), Quaternion.Slerp(_exitSupportRotation, _supportRotation, t),
             _eyeAtStart + _bodyRotation * new Vector3(-_side * 0.38f, -0.48f, 0.04f), weight);
+        if (_mask) RelaxMaskWrist();
         ApplyGrip(0f);
         _supportPose.Apply(false, true);
         _smoke?.Tick(_eye, _eye.position);
@@ -248,7 +324,7 @@ internal sealed class CustomDraw
     internal void Evaluate()
     {
         if (_exiting) { EvaluateExit(); return; }
-        var elapsed = Time.time - _start;
+        var elapsed = Clock - _start;
         var nextIndex = _drawIndex;
         while (nextIndex + 1 < _session.DrawStarts.Length && elapsed >= _session.DrawStarts[nextIndex + 1]) nextIndex++;
         if (nextIndex != _drawIndex)
@@ -269,11 +345,14 @@ internal sealed class CustomDraw
         }
         // Solve for the wrist from the cigarette's filter endpoint, not vice versa.
         var mouth = _eye.TransformPoint(new Vector3(0f, Mathf.Clamp(Plugin.MouthHeight.Value, -0.15f, -0.02f), Mathf.Clamp(Plugin.MouthDistance.Value, 0.01f, 0.15f)));
+        // Seat the opening against the face, slightly behind the eye plane. The
+        // raised nose edge remains in view instead of presenting the bowl interior.
+        if (_mask) mouth = _eye.TransformPoint(new Vector3(0f, -0.075f, -0.015f));
         if (!_exhaled && drawTime >= 3.8f + _exhaleDelay)
         {
             _exhaled = true;
             _audio?.Play(false, _exhaleDuration);
-            if (!_smokeUnavailable)
+            if (!_mask && !_smokeUnavailable)
             {
                 try
                 {
@@ -288,16 +367,16 @@ internal sealed class CustomDraw
             }
         }
         _smoke?.Tick(_eye, mouth);
-        var drawRotation = Quaternion.LookRotation(_eye.forward, -_side * _eye.right) * Quaternion.Inverse(_cigarette.localRotation);
+        var drawRotation = Quaternion.LookRotation(_eye.forward, _mask ? _eye.up : -_side * _eye.right) * Quaternion.Inverse(_cigarette.localRotation);
         // Roll around the cigarette's mouth-facing axis: fingers rise and wrist drops.
         // Mirror for the left-hand option. The existing pose blend eases this in and out.
-        drawRotation = Quaternion.AngleAxis(-_side * 30f, _eye.forward) * drawRotation;
-        var filterInHand = _cigarette.localPosition + _cigarette.localRotation * new Vector3(0f, 0f, -0.02f);
+        if (!_mask) drawRotation = Quaternion.AngleAxis(-_side * 30f, _eye.forward) * drawRotation;
+        var filterInHand = _cigarette.localPosition + _cigarette.localRotation * (_mask ? MaskModel.MouthPoint : new Vector3(0f, 0f, -0.02f));
         var drawPosition = mouth - drawRotation * filterInHand;
         var position = Vector3.Lerp(_restPosition, drawPosition, blend);
         // A small outward arc keeps the raising hand away from the chest.
         position += _bodyRotation * new Vector3(0.045f * Mathf.Sin(blend * Mathf.PI), 0f, 0f);
-        var weight = Smooth((Time.time - _start) / 0.6f);
+        var weight = Smooth((Clock - _start) / 0.6f);
         if (_shoulder != null)
         {
             // Absolute pose: repeated Animator/LateUpdate evaluation cannot accumulate shoulder rotation.
@@ -317,6 +396,7 @@ internal sealed class CustomDraw
             var correction = Quaternion.FromToRotation(fingerDirection, forearmDirection.normalized);
             _hand.rotation = Quaternion.Slerp(Quaternion.identity, correction, (1f - blend) * weight) * _hand.rotation;
         }
+        if (_mask) RelaxMaskWrist();
         _supportArm.Solve(_supportPosition, _supportRotation,
             _eyeAtStart + _bodyRotation * new Vector3(-_side * 0.38f, -0.42f, 0.1f), weight);
         ApplyGrip(blend);
@@ -328,6 +408,25 @@ internal sealed class CustomDraw
             Plugin.Logger.LogInfo($"[RailContact] settled: rightActual={_hand.position.ToString("F4")}, rightTarget={_restPosition.ToString("F4")}, rightError={Vector3.Distance(_hand.position, _restPosition):F4}; {_arm.DescribeReach(_restPosition)}; leftActual={_supportHand.position.ToString("F4")}, leftTarget={_supportPosition.ToString("F4")}, leftError={Vector3.Distance(_supportHand.position, _supportPosition):F4}");
         }
 #endif
+    }
+
+    private void RelaxMaskWrist()
+    {
+        // A palm-up target must turn the forearm as well as the hand. Otherwise
+        // all axial rotation lands on the wrist's skin weights and pinches it.
+        // Rotate only about the elbow-to-wrist axis, preserving the solved grip.
+        var axis = _hand.position - _forearm.position;
+        if (axis.sqrMagnitude < 0.000001f) return;
+        axis.Normalize();
+        var naturalPalm = _forearm.rotation * _neutralWrist * (_handFrame * Vector3.up);
+        var desiredPalm = _hand.rotation * (_handFrame * Vector3.up);
+        var from = Vector3.ProjectOnPlane(naturalPalm, axis);
+        var to = Vector3.ProjectOnPlane(desiredPalm, axis);
+        if (from.sqrMagnitude < 0.000001f || to.sqrMagnitude < 0.000001f) return;
+        var rotation = _hand.rotation;
+        var position = _hand.position;
+        _forearm.rotation = Quaternion.AngleAxis(Vector3.SignedAngle(from, to, axis), axis) * _forearm.rotation;
+        _hand.SetPositionAndRotation(position, rotation);
     }
 
     private static float Smooth(float t)

@@ -40,6 +40,12 @@ public sealed class SmokingController : MonoBehaviour
     private SmokingSession? _session;
     private SmokingHud? _hud;
     private Transform? _paper, _ember;
+    private bool _blunt;
+    private SmokeKind _kind;
+    private readonly SmokingWheel _wheel = new();
+    private JointModel? _joint;
+    private readonly CannabisEffects _high = new();
+    private readonly MaskAfterEffect _maskEffect = new();
 
     public SmokingController(IntPtr pointer) : base(pointer) { }
     public void Awake() => Instance = this;
@@ -48,9 +54,19 @@ public sealed class SmokingController : MonoBehaviour
     {
         try
         {
+            CreditAfterEffects();
+            _maskEffect.Tick(GameplayAvailable(), _active);
+            _high.Tick(GameplayAvailable(), _active && _blunt, _active);
             for (var i = _drops.Count - 1; i >= 0; i--)
                 if (!_drops[i].Tick()) { _drops[i].Dispose(); _drops.RemoveAt(i); }
             var keyboard = Keyboard.current;
+            var choice = _wheel.Tick();
+            if (choice.HasValue)
+            {
+                if (CanSmokeAtRail()) StartSmoking(choice.Value);
+                return;
+            }
+            if (_wheel.Busy) return;
             if (_active && (_hands == null ||
                 PlayerManager._instance?.LocalPlayer?.Character?.Controller?.HandsAnimator != _hands ||
                 UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle != _scene))
@@ -58,7 +74,7 @@ public sealed class SmokingController : MonoBehaviour
                 Stop(null);
                 return;
             }
-            if (_active && (!_exiting && (!GameplayAvailable() || Time.time - _started >= (_session?.Duration ?? 60f) ||
+            if (_active && (!_exiting && (!GameplayAvailable() || (_kind == SmokeKind.Mask ? Time.unscaledTime : Time.time) - _started >= (_session?.Duration ?? 60f) ||
                 Gamepad.current?.leftStick.ReadValue().sqrMagnitude > 0.1f))) BeginExit();
             if (_exiting)
             {
@@ -80,17 +96,18 @@ public sealed class SmokingController : MonoBehaviour
                 return;
             }
             if (!GameplayAvailable()) return;
-            if (!_active && Mouse.current?.leftButton.wasPressedThisFrame == true && CanSmokeAtRail()) StartSmoking();
+            if (!_active && Mouse.current?.leftButton.wasPressedThisFrame == true && CanSmokeAtRail()) _wheel.Open();
         }
         catch (Exception e)
         {
             Plugin.Logger.LogError(e);
+            _maskEffect.Clear();
             Stop("Smoking failed; see the Cigarette log.");
         }
     }
 
     [HideFromIl2Cpp]
-    private void StartSmoking()
+    private void StartSmoking(SmokeKind kind)
     {
         Stop(null);
         var character = PlayerManager._instance.LocalPlayer.Character;
@@ -104,6 +121,11 @@ public sealed class SmokingController : MonoBehaviour
             return;
         }
         if (!RailingTarget.TryTarget(character, out var railTop, out _)) return;
+        if (kind == SmokeKind.Mask && !MaskModel.Available())
+        {
+            Notice("City inhalant-mask assets are not loaded here. Try a populated street.");
+            return;
+        }
         var clipName = IdleClip;
         var clip = Resources.FindObjectsOfTypeAll<AnimationClip>().FirstOrDefault(c => c.name == clipName);
         if (clip == null)
@@ -137,6 +159,8 @@ public sealed class SmokingController : MonoBehaviour
             if (renderer != null) _renderers.Add((renderer, renderer.enabled));
         _hands = hands; // Cleanup owns subsequent mutations, including partial startup failures.
         _active = true;
+        _high.SuspendCamera();
+        _maskEffect.Suspend();
         _exiting = false;
         _stance = new StanceControl(hands, character.Controller);
         _stance.Place(character);
@@ -154,23 +178,35 @@ public sealed class SmokingController : MonoBehaviour
         hands.rootMotion = false;
         animator.SetFloat(PlayerHandsAnimator.Param.Speed, 0f);
         foreach (var entry in _renderers) entry.Renderer.enabled = true;
-        _session = new SmokingSession(Plugin.SessionDuration.Value, () => UnityEngine.Random.value);
-        _started = Time.time;
+        _kind = kind;
+        _blunt = kind == SmokeKind.Joint;
+        var duration = kind == SmokeKind.Mask ? Plugin.MaskSessionDuration.Value :
+            _blunt ? Plugin.CannabisSessionDuration.Value : Plugin.SessionDuration.Value;
+        _session = new SmokingSession(duration, () => UnityEngine.Random.value);
+        if (_blunt) _high.BeginSmoke();
+        if (kind == SmokeKind.Mask) _maskEffect.BeginSmoke();
+        _started = kind == SmokeKind.Mask ? Time.unscaledTime : Time.time;
         _scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle;
         Evaluate(hands);
         _stance.AlignCustomBody(animator, character.transform.position, character.Controller.Rotation);
         CreateCigarette(animator);
         if (_cigarette != null)
         {
-            _customDraw = new CustomDraw(hands, character.Controller.Camera.transform, _cigarette.transform, character.Controller.Rotation, character, _session, railTop);
+            _customDraw = new CustomDraw(hands, character.Controller.Camera.transform, _cigarette.transform, character.Controller.Rotation, character, _session, railTop, _kind);
         }
         RailPrompt.Release();
         _hud = new SmokingHud();
         _hud.Hide();
+        Plugin.Logger.LogInfo($"Smoking session started: {_kind}, {_session.Duration} seconds.");
     }
 
     [HideFromIl2Cpp]
     internal bool Owns(PlayerHandsAnimator hands) => _hands != null && _hands == hands;
+
+    [HideFromIl2Cpp]
+    internal bool AllowMaskMovement(PlayerCharacterController controller) =>
+        !_active && _maskEffect.OwnsSlowMotion && GameplayAvailable() &&
+        PlayerManager._instance?.LocalPlayer?.Character?.Controller == controller;
 
     [HideFromIl2Cpp]
     internal void Evaluate(PlayerHandsAnimator hands)
@@ -183,12 +219,14 @@ public sealed class SmokingController : MonoBehaviour
         animator.transform.localRotation = _animatorRotation;
         _stance?.Apply();
         _customDraw?.Evaluate();
+        if (_customDraw != null && _joint != null) _joint.UpdateBurn(_customDraw.BurnProgress);
         if (_customDraw != null && _cigarette != null && _paper != null && _ember != null)
         {
             var burn = _customDraw.BurnProgress;
             var length = 0.064f * (1f - burn);
             _paper.localPosition = new Vector3(0f, 0f, length * 0.5f);
-            _paper.localScale = new Vector3(0.007f, Mathf.Max(length, 0.00001f) * 0.5f, 0.007f);
+            var width = _blunt ? 0.010f : 0.007f;
+            _paper.localScale = new Vector3(width, Mathf.Max(length, 0.00001f) * 0.5f, width);
             _ember.localPosition = new Vector3(0f, 0f, length + 0.001f);
             _paper.gameObject.SetActive(burn < 1f);
             _ember.gameObject.SetActive(burn < 1f);
@@ -227,6 +265,8 @@ public sealed class SmokingController : MonoBehaviour
             if (normal.sqrMagnitude > 0.1f) _cigarette.transform.rotation = Quaternion.LookRotation(left ? -normal : normal, hand.up);
         }
         var layer = _renderers.Count > 0 ? _renderers[0].Renderer.gameObject.layer : hand.gameObject.layer;
+        if (_kind == SmokeKind.Mask) { MaskModel.Create(_cigarette.transform, layer); return; }
+        if (_blunt) { _joint = new JointModel(_cigarette.transform, layer); return; }
         Cylinder("Paper", new Vector3(0f, 0f, 0.032f), 0.064f, new Color(0.9f, 0.88f, 0.8f), layer);
         Cylinder("Filter", new Vector3(0f, 0f, -0.01f), 0.02f, new Color(0.64f, 0.36f, 0.13f), layer);
         Cylinder("Ember", new Vector3(0f, 0f, 0.065f), 0.003f, new Color(1f, 0.18f, 0.015f), layer, true);
@@ -243,7 +283,8 @@ public sealed class SmokingController : MonoBehaviour
         part.transform.SetParent(_cigarette!.transform, false);
         part.transform.localPosition = position;
         part.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-        part.transform.localScale = new Vector3(0.007f, length / 2f, 0.007f);
+        var width = _blunt ? 0.010f : 0.007f;
+        part.transform.localScale = new Vector3(width, length / 2f, width);
         var collider = part.GetComponent<Collider>();
         collider.enabled = false;
         Object.Destroy(collider);
@@ -264,6 +305,7 @@ public sealed class SmokingController : MonoBehaviour
     private void BeginExit()
     {
         if (!_active || _exiting) return;
+        CreditAfterEffects();
         if (_customDraw == null) { Stop(null); return; }
         _exiting = true;
         _customDraw.BeginExit();
@@ -274,9 +316,10 @@ public sealed class SmokingController : MonoBehaviour
     [HideFromIl2Cpp]
     private void DropCigarette()
     {
-        if (_cigarette == null) return;
-        var drop = new DroppedCigarette(_cigarette, _materials.ToArray(), _scene, PlayerManager._instance.LocalPlayer.Character.transform);
+        if (_cigarette == null || _kind == SmokeKind.Mask) return; // Reusable mask is lowered and put away.
+        var drop = new DroppedCigarette(_cigarette, _materials.ToArray(), _scene, PlayerManager._instance.LocalPlayer.Character.transform, _joint);
         _drops.Add(drop);
+        _joint = null; // Mesh/material ownership follows the dropped joint.
         _cigarette = null;
         _paper = _ember = null;
         _materials.Clear(); // Ownership moves to the falling prop until it despawns.
@@ -285,6 +328,9 @@ public sealed class SmokingController : MonoBehaviour
     [HideFromIl2Cpp]
     internal void Stop(string? message)
     {
+        try { _wheel.Close(); }
+        catch (Exception e) { Plugin.Logger.LogWarning("Closing smoking menu: " + e.Message); }
+        CreditAfterEffects();
         var hands = _hands;
         _active = false;
         _exiting = false;
@@ -331,6 +377,7 @@ public sealed class SmokingController : MonoBehaviour
             _bones.Clear();
             if (_cigarette != null) Object.Destroy(_cigarette);
             _cigarette = null;
+            _joint?.Dispose(); _joint = null;
             _paper = _ember = null;
             _session = null;
             foreach (var material in _materials) if (material != null) Object.Destroy(material);
@@ -357,7 +404,7 @@ public sealed class SmokingController : MonoBehaviour
     }
 
     [HideFromIl2Cpp]
-    private static bool GameplayAvailable()
+    internal static bool GameplayAvailable()
     {
         if (!Application.isFocused || Time.timeScale == 0f || PlayerManager._instance?.LocalPlayer?.Character == null) return false;
         var ui = UIManager._instance;
@@ -383,8 +430,17 @@ public sealed class SmokingController : MonoBehaviour
         return RailingTarget.TryTarget(character, out _, out _);
     }
 
-    public void OnDisable() { RailPrompt.Release(); Stop(null); foreach (var drop in _drops) drop.Dispose(); _drops.Clear(); }
-    public void OnDestroy() { Stop(null); foreach (var drop in _drops) drop.Dispose(); _drops.Clear(); if (Instance == this) Instance = null; }
+    [HideFromIl2Cpp]
+    private void CreditAfterEffects()
+    {
+        if (_active && _blunt && !_exiting && _session != null && _customDraw != null)
+            _high.Credit(_customDraw.BurnProgress, _session.Duration);
+        if (_active && _kind == SmokeKind.Mask && !_exiting && _session != null && _customDraw != null)
+            _maskEffect.Credit(_customDraw.BurnProgress, _session.Duration);
+    }
+
+    public void OnDisable() { RailPrompt.Release(); Stop(null); _high.Dispose(); _maskEffect.Clear(); foreach (var drop in _drops) drop.Dispose(); _drops.Clear(); }
+    public void OnDestroy() { Stop(null); _wheel.Dispose(); _high.Dispose(); _maskEffect.Clear(); foreach (var drop in _drops) drop.Dispose(); _drops.Clear(); if (Instance == this) Instance = null; }
 }
 
 [HarmonyPatch(typeof(PlayerHandsAnimator), nameof(PlayerHandsAnimator.ManualUpdate))]

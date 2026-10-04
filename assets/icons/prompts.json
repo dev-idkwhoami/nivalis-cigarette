@@ -1,0 +1,18 @@
+{
+  "tool": "built-in image_gen",
+  "prompts": [
+    {
+      "name": "cigarette",
+      "prompt": "Use case: stylized-concept. Asset type: coloured pixel-art inventory icon for a voxel cyberpunk game radial menu. Make one single ordinary cigarette, white paper cylinder with ochre cork filter and tiny dark ash red ember at opposite end. Isometric diagonal lower left to upper right, centered, complete object, thick enough to read at 64x64, fills 80% square. Chunky voxel blocks, deliberately crisp square pixel clusters, shaded warm cream and muted orange with charcoal outline, physically volumetric not flat white symbol. Genuine transparent alpha background, no shadow outside object, no text, no letters, no hands, no frame, no smoke cloud, no extra items. Clean game item sprite."
+    },
+    {
+      "name": "joint",
+      "prompt": "Use case: stylized-concept. Asset type: coloured pixel-art inventory icon for a voxel cyberpunk game radial menu. Make one single hand-rolled joint, classical conical WHITE ivory mottled paper body widening to a broad end that rapidly pinches into a tiny twisted paper tip; narrow rolled pale cardboard mouthpiece at other end. Isometric diagonal lower left to upper right, centered complete object fills 80% square, read clearly at 64x64. Match chunky voxel blocks, crisp square pixel clusters and dark charcoal outline, warm ivory taupe shadows with subtly muted green mottling, volumetric not flat white symbol. Genuine transparent alpha background, no background shadow, no text or labels, no hands, no marijuana leaves, no extra objects, no smoke cloud, no frame."
+    },
+    {
+      "name": "mask",
+      "prompt": "Use case: stylized-concept. Create a NEW colored pixel/voxel game inventory illustration of ONE inhalant mask lying on its side. Attached image is a native 3D model rotated into the correct laid-down pose, shown from three camera angles; use the MIDDLE view as exact geometry and pose reference, other views explain shape. Render ONE object only, centered fully visible with margin, transparent alpha background. Critical geometry: the purple thin stem emerges axially from the CENTER of the CLOSED CONVEX BACK of the half-ball bowl, opposite the face opening, like the stem of a wineglass emerging from the bottom of its bowl. It does NOT emerge from a side wall or rim. Keep all components rigidly connected exactly as native model. Bowl opening must be nearly VERTICAL facing left and toward viewer, NOT facing upward like a frying pan. Stem extends from behind closed bowl toward right and slightly down. The object rests naturally on TWO points of an implied flat surface: one curved SIDE of the half-ball shell and the far end of the stem. This is the whole rigid model tipped onto its side, not a redesign. Preserve dark slate blue-gray rounded-square faceted half-ball cup, lavender lip with small nose notch, thin purple/magenta stem with small red-orange segment, black end, silver-gray rings and asymmetric hardware, gray module and tiny cyan light. Stylize as crisp chunky voxel/pixel illustration with clean readable lighting. No actual table or floor, no shadows outside object, genuine transparent background, no labels, no hands, no text. No upright mask, no upward-facing bowl, no frying-pan side handle. Composition occupies 85% square canvas.",
+      "reference": "Native CyberVape/Purple_vape mesh and material rotated as a rigid object; work/mask-investigation/native-mask-laid-down.png in parent workspace."
+    }
+  ]
+}

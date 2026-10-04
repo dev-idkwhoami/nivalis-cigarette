@@ -29,26 +29,7 @@ internal static class RailingTarget
         }
         if (hit.collider == null || hit.collider.transform.IsChildOf(character.transform)) return false;
         reason = "No recognized railing/fence name or reviewed scene/mesh match";
-        var rail = false;
-        for (var node = hit.collider.transform; node != null; node = node.parent)
-        {
-            var name = node.name.ToLowerInvariant();
-            if (name.Contains("railing") || name.Contains("balustr") || name.Contains("guardrail") || name.Contains("handrail") || name.Contains("fence")) { rail = true; break; }
-        }
-        if (!rail)
-        {
-            var mesh = hit.collider.TryCast<MeshCollider>()?.sharedMesh;
-            if (mesh == null) mesh = hit.collider.GetComponent<MeshFilter>()?.sharedMesh;
-            rail = mesh != null && IsReviewedRailMesh(hit.collider.gameObject.scene.name, mesh.name);
-            // Static batching gives this mesh a generated name; use its exact object hierarchy instead.
-            if (!rail && hit.collider.gameObject.scene.name == "15_Metro_Hub")
-            {
-                var node = hit.collider.transform;
-                rail = node.name == "Column_Beam (66)" && node.parent?.name == "Other" &&
-                    node.parent.parent?.name == "StreetProps" && node.parent.parent.parent == null;
-            }
-        }
-        if (!rail) return false;
+        if (!IsRecognizedRail(hit.collider)) return false;
         var maximum = Plugin.RailDistance.Value;
         maximum = float.IsFinite(maximum) ? Mathf.Clamp(maximum, 0.2f, 0.65f) : 0.45f;
         var horizontalDistance = Vector3.ProjectOnPlane(hit.point - character.transform.position, Vector3.up).magnitude;
@@ -65,6 +46,39 @@ internal static class RailingTarget
         hit = top; // Pass the verified surface to hand placement, not the originally aimed front face.
         reason = "Eligible railing target";
         return true;
+    }
+
+    private static bool IsRecognizedRail(Collider collider)
+    {
+        var rail = false;
+        for (var node = collider.transform; node != null; node = node.parent)
+        {
+            var name = node.name.ToLowerInvariant();
+            if (name.Contains("railing") || name.Contains("balustr") || name.Contains("guardrail") || name.Contains("handrail") || name.Contains("fence")) { rail = true; break; }
+        }
+        if (!rail)
+        {
+            var mesh = collider.TryCast<MeshCollider>()?.sharedMesh;
+            if (mesh == null) mesh = collider.GetComponent<MeshFilter>()?.sharedMesh;
+            rail = mesh != null && IsReviewedRailMesh(collider.gameObject.scene.name, mesh.name);
+            // Static batching gives this mesh a generated name; use its exact object hierarchy instead.
+            if (!rail && collider.gameObject.scene.name == "15_Metro_Hub")
+            {
+                var node = collider.transform;
+                rail = node.name == "Column_Beam (66)" && node.parent?.name == "Other" &&
+                    node.parent.parent?.name == "StreetProps" && node.parent.parent.parent == null;
+            }
+            // Captured Seaside barriers use BoxColliders and a shared static-batch
+            // render mesh. Match only these two reviewed objects, not that mesh.
+            if (!rail && collider.gameObject.scene.name == "9_Seaside_Boardwalk" && collider.TryCast<BoxCollider>() != null)
+            {
+                var node = collider.transform;
+                rail = (node.name == "Tech_Construction (8)" || node.name == "Tech_Construction (1)") &&
+                    node.parent?.name == "Tech" && node.parent.parent?.name == "_Detail_Props" &&
+                    node.parent.parent.parent == null;
+            }
+        }
+        return rail;
     }
 
     private static bool IsReviewedPlayerBlocker(Collider collider)
@@ -102,6 +116,7 @@ internal static class RailingTarget
         ("4_Central_Canyon", "Japanese_Style_Building_2_Main_1floor_3_6") => true,
         ("11_Hive_Mall", "Inner_City_Building_With_Shops_Combined__floor_1_3_0") => true,
         ("9_Seaside_Boardwalk", "Parking_Lot_Parkinglot_Right_2") => true,
+        ("9_Seaside_Boardwalk", "Floating_Platform_Shops_2_Stairs_3_1") => true,
         ("17_Calypso_Island", "Parking_Lot_Parkinglot_Left_4") => true,
         ("17_Calypso_Island", "Asian_Restaurant_Metal_Stairs_25") => true,
         ("17_Calypso_Island", "Floating_Platform_Shops_2_Stairs_3_1") => true,

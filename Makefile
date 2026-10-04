@@ -63,3 +63,16 @@ check-release: check-sdk
 
 clean:
 	@rm -rf -- bin src/obj tests/bin tests/obj
+
+# Opt-in local tooling. Never a dependency of build/install/package/deploy.
+.PHONY: build-rail-dev install-rail-dev
+build-rail-dev: build
+	@"$$DOTNET" build dev/rail-tools/RailDev.csproj --configuration "$$CONFIGURATION" "-p:GamePath=$$(cd "$$GAME_PATH" && pwd)" --nologo
+
+install-rail-dev: build-rail-dev
+	@install -Dm644 bin/Nivalis.Cigarette.dll "$$GAME_PATH/BepInEx/plugins/Nivalis.Cigarette.dll"
+	@install -Dm644 dev/rail-tools/bin/Nivalis.Cigarette.RailDev.dll "$$GAME_PATH/BepInEx/plugins/Nivalis.Cigarette.RailDev.dll"
+
+.PHONY: test-rail-dev
+test-rail-dev: check-sdk
+	@"$$DOTNET" run --project dev/tests/RailDevTests.csproj --configuration "$$CONFIGURATION"

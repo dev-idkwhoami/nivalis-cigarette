@@ -12,10 +12,11 @@ internal sealed class BreathAudio
     private readonly AudioSource _source;
     private AudioClip? _clip;
     private bool _failed;
+    private readonly bool _mask;
 
     internal static void LoadRecordings()
     {
-        foreach (var name in new[] { "inhale_01.wav", "inhale_02.wav", "exhale_01.wav", "exhale_02.wav" })
+        foreach (var name in new[] { "inhale_01.wav", "inhale_02.wav", "exhale_01.wav", "exhale_02.wav", "mask_inhale.wav" })
         {
             using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("Cigarette.Audio." + name)
                 ?? throw new InvalidDataException("Missing embedded recording: " + name);
@@ -23,8 +24,9 @@ internal sealed class BreathAudio
         }
     }
 
-    internal BreathAudio(Transform eye)
+    internal BreathAudio(Transform eye, bool mask = false)
     {
+        _mask = mask;
         _object = new GameObject("Cigarette.BreathAudio");
         try
         {
@@ -45,12 +47,14 @@ internal sealed class BreathAudio
         try
         {
             Stop();
-            var volume = inhale ? Plugin.InhaleVolume.Value : Plugin.ExhaleVolume.Value;
-            var defaultVolume = inhale ? Plugin.DefaultInhaleVolume : Plugin.DefaultExhaleVolume;
+            var maskInhale = _mask && inhale;
+            var volume = maskInhale ? Plugin.MaskInhaleVolume.Value : inhale ? Plugin.InhaleVolume.Value : Plugin.ExhaleVolume.Value;
+            var defaultVolume = maskInhale ? Plugin.DefaultMaskInhaleVolume : inhale ? Plugin.DefaultInhaleVolume : Plugin.DefaultExhaleVolume;
             _source.volume = float.IsFinite(volume) ? Mathf.Clamp01(volume) : defaultVolume;
             if (_source.volume == 0f) return;
-            var name = (inhale ? "inhale_" : "exhale_") + (UnityEngine.Random.Range(0, 2) + 1).ToString("00") + ".wav";
-            if (!Recordings.TryGetValue(name, out var recording)) return;
+            var name = maskInhale ? "mask_inhale.wav" : (inhale ? "inhale_" : "exhale_") + (UnityEngine.Random.Range(0, 2) + 1).ToString("00") + ".wav";
+            if (!Recordings.TryGetValue(name, out var recording))
+                throw new InvalidDataException("Bundled recording was not loaded: " + name);
             var data = recording.Excerpt(duration);
             _clip = AudioClip.Create("Cigarette." + name, data.Length, 1, recording.Rate, false);
             if (!_clip.SetData(new Il2CppStructArray<float>(data), 0)) throw new InvalidOperationException("AudioClip.SetData failed.");

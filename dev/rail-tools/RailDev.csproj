@@ -1,11 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <AssemblyName>Nivalis.Cigarette</AssemblyName>
-    <Version>1.1.0</Version>
+    <AssemblyName>Nivalis.Cigarette.RailDev</AssemblyName>
+    <OutputPath>$(MSBuildProjectDirectory)/bin/</OutputPath>
+    <Version>1.0.0</Version>
   </PropertyGroup>
   <ItemGroup>
-    <EmbeddedResource Include="../assets/icons/*.png" LogicalName="Cigarette.Icons.%(Filename)%(Extension)" />
-    <EmbeddedResource Include="../assets/*.wav" LogicalName="Cigarette.Audio.%(Filename)%(Extension)" />
+    <ProjectReference Include="../../src/Cigarette.csproj" Private="false" />
     <Reference Include="0Harmony" HintPath="$(GamePath)/BepInEx/core/0Harmony.dll" Private="false" />
     <Reference Include="BepInEx.Core" HintPath="$(GamePath)/BepInEx/core/BepInEx.Core.dll" Private="false" />
     <Reference Include="BepInEx.Unity.IL2CPP" HintPath="$(GamePath)/BepInEx/core/BepInEx.Unity.IL2CPP.dll" Private="false" />

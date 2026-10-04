@@ -10,10 +10,12 @@ internal sealed class DroppedCigarette
     private readonly Material[] _materials;
     private readonly float _started;
     private readonly int _scene;
-    internal DroppedCigarette(GameObject cigarette, Material[] materials, int scene, Transform player)
+    private readonly JointModel? _joint;
+    internal DroppedCigarette(GameObject cigarette, Material[] materials, int scene, Transform player, JointModel? joint = null)
     {
         _object = cigarette;
         _materials = materials;
+        _joint = joint;
         _scene = scene;
         _started = Time.time;
         cigarette.transform.SetParent(null, true);
@@ -27,9 +29,10 @@ internal sealed class DroppedCigarette
         var end = paper != null && paper.gameObject.activeSelf ? paper.localScale.y * 2f : 0f;
         if (ember != null && ember.gameObject.activeSelf)
             end = Mathf.Max(end, ember.localPosition.z + ember.localScale.y);
+        if (joint != null) end = joint.Length + (joint.Length > 0f ? 0.0015f : 0f);
         var collider = cigarette.AddComponent<CapsuleCollider>();
         collider.direction = 2;
-        collider.radius = 0.0035f;
+        collider.radius = joint?.Radius ?? 0.0035f;
         collider.height = end + 0.02f;
         collider.center = new Vector3(0f, 0f, (end - 0.02f) * 0.5f);
         collider.contactOffset = 0.0005f;
@@ -60,5 +63,6 @@ internal sealed class DroppedCigarette
     {
         if (_object != null) Object.Destroy(_object);
         foreach (var material in _materials) if (material != null) Object.Destroy(material);
+        _joint?.Dispose();
     }
 }

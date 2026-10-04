@@ -5,8 +5,15 @@
     <OutputPath>bin/</OutputPath>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../src/MaskSlowMotion.cs" Link="MaskSlowMotion.cs" />
+    <Compile Include="../src/GripSurface.cs" Link="GripSurface.cs" />
+    <Compile Include="../src/FingerFit.cs" Link="FingerFit.cs" />
     <Compile Include="../src/HandMotion.cs" Link="HandMotion.cs" />
     <Compile Include="../src/SmokingSession.cs" Link="SmokingSession.cs" />
+    <Compile Include="../src/HighSession.cs" Link="HighSession.cs" />
+    <Compile Include="../src/HighMotion.cs" Link="HighMotion.cs" />
+    <Compile Include="../src/JointShape.cs" Link="JointShape.cs" />
+    <Compile Include="../src/RgbOffsets.cs" Link="RgbOffsets.cs" />
     <Compile Include="../src/BreathRecording.cs" Link="BreathRecording.cs" />
     <EmbeddedResource Include="../assets/*.wav" LogicalName="Cigarette.Audio.%(Filename)%(Extension)" />
   </ItemGroup>
