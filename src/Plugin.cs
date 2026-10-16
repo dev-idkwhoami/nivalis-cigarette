@@ -11,7 +11,7 @@ namespace NivalisMods.Cigarette;
 [BepInPlugin(Id, "Cigarette", Version)]
 public sealed class Plugin : BasePlugin
 {
-    public const string Version = "1.1.0";
+    public const string Version = "1.1.1";
     public const string Id = "local.nivalis.cigarette";
     internal static ManualLogSource Logger = null!;
     internal const float DefaultInhaleVolume = 0.01f;
