@@ -1,4 +1,7 @@
 using HarmonyLib;
+#if CIGARETTE_API
+using NivalisMods.Cigarette.Api;
+#endif
 using System.Reflection;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Nivalis;
@@ -38,15 +41,28 @@ internal sealed class SmokingWheel
             wheel.Clear();
             foreach (var kind in new[] { SmokeKind.Cigarette, SmokeKind.Joint, SmokeKind.Mask })
             {
+#if CIGARETTE_API
+                var availability = Plugin.Api.Items.GetAvailability((SmokingItem)kind);
+                if (availability == ItemAvailability.Hidden) continue;
+#endif
                 var selected = kind;
                 var label = kind == SmokeKind.Mask ? "Inhalant mask" : kind.ToString();
                 wheel.AddAction(_icons[(int)kind], label, false, (Il2CppSystem.Action)(() =>
                 {
+#if CIGARETTE_API
+                    if (Plugin.Api.Items.GetAvailability((SmokingItem)selected) != ItemAvailability.Available) return;
+#endif
                     _choice = selected;
                     _choiceFrame = Time.frameCount;
                     _deadline = Time.unscaledTime + 2f;
                     // Native ClickExecuted closes the wheel after this callback.
-                }));
+                }),
+#if CIGARETTE_API
+                    availability == ItemAvailability.Available
+#else
+                    true
+#endif
+                );
             }
             wheel.AddCloseAction();
             _openingWheel = wheel;
@@ -70,7 +86,7 @@ internal sealed class SmokingWheel
             _wheel = null;
             _closedFrame = Time.frameCount;
         }
-        if (!_choice.HasValue || Time.frameCount <= _choiceFrame) return null;
+        if (!_choice.HasValue || Time.frameCount <= _choiceFrame || Time.frameCount <= _closedFrame) return null;
         if (Time.unscaledTime > _deadline) { Close(); return null; }
         // Wait for the native window to release its gameplay locks. The controller
         // revalidates hands, movement and the railing before starting the session.

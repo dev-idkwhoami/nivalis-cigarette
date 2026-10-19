@@ -1,4 +1,7 @@
 using Nivalis;
+#if CIGARETTE_API
+using NivalisMods.Cigarette.Api;
+#endif
 using Nivalis.Playables;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -38,7 +41,11 @@ internal sealed class CannabisEffects : IDisposable
     {
         if (_scene == SceneManager.GetActiveScene().handle && !_failed)
         {
+#if CIGARETTE_API
+            _session.Credit(burn, duration, Plugin.Api.Effects.IsAutomaticEffectsEnabled(SmokingItem.Joint) ? Plugin.HighDurationMultiplier.Value : 0f);
+#else
             _session.Credit(burn, duration, Plugin.HighDurationMultiplier.Value);
+#endif
             if (!_reportedCredit && _session.Remaining > 0f)
             {
                 Plugin.Logger.LogInfo($"Cannabis first draw credited: {_session.Remaining:F1}s remaining.");
@@ -59,11 +66,30 @@ internal sealed class CannabisEffects : IDisposable
         {
             var character = PlayerManager._instance?.LocalPlayer?.Character;
             if (_scene != SceneManager.GetActiveScene().handle || character == null || character != _character)
-            { Dispose(); return; }
-            if (_failed || _session.Remaining <= 0f) { ClearVisuals(); return; }
+            {
+                Dispose();
+#if CIGARETTE_API
+                if (character == null || (!Plugin.Api.HasDirectEffect(EffectType.CameraDistortion) &&
+                    !Plugin.Api.HasDirectEffect(EffectType.Apparitions))) return;
+                _scene = SceneManager.GetActiveScene().handle;
+                _character = character;
+                _lastPosition = character.transform.position;
+                _failed = false;
+#else
+                return;
+#endif
+            }
+            if (_failed) { ClearVisuals(); return; }
             var delta = gameplay ? Time.deltaTime : 0f;
             _session.Tick(delta, smoking);
+#if CIGARETTE_API
+            var cameraStrength = Plugin.Api.EffectStrength(EffectType.CameraDistortion, _session.Strength);
+            var strength = Plugin.Api.EffectStrength(EffectType.Apparitions, _session.Strength);
+#else
+            var cameraStrength = _session.Strength;
             var strength = _session.Strength;
+#endif
+            if (cameraStrength <= 0f && strength <= 0f) { ClearVisuals(); return; }
             var camera = character.Controller.Camera;
             // Camera focus flags are not gameplay visibility: ordinary camera targeting
             // can set them, and zoom can lock movement. Use explicit UI/boat/sleep state.
@@ -84,8 +110,13 @@ internal sealed class CannabisEffects : IDisposable
             }
             // Keep the entire smoking/lowering animation clear, including a second smoke
             // during an existing high. Ease the camera effect in only after putting it down.
-            _cameraStrength = !visible || holdingSmoke ? 0f : Mathf.MoveTowards(_cameraStrength, strength, delta / 2f);
+            _cameraStrength = !visible || holdingSmoke ? 0f : Mathf.MoveTowards(_cameraStrength, cameraStrength, delta / 2f);
             if (_cameraEffect != null) _cameraEffect.Strength = _cameraStrength;
+            if (strength <= 0f)
+            {
+                foreach (var apparition in _apparitions) apparition.Dispose();
+                _apparitions.Clear();
+            }
             for (var i = _apparitions.Count - 1; i >= 0; i--)
                 if (!_apparitions[i].Tick(delta, strength, visible, camera != null ? camera.transform.position : Vector3.zero))
                 { _apparitions[i].Dispose(); _apparitions.RemoveAt(i); }
@@ -182,6 +213,22 @@ internal sealed class CannabisEffects : IDisposable
     }
 
     internal static float Finite(float value, float fallback, float min, float max) => float.IsFinite(value) ? Mathf.Clamp(value, min, max) : fallback;
+
+#if CIGARETTE_API
+    internal void RefreshPermissions()
+    {
+        if (Plugin.Api.EffectStrength(EffectType.CameraDistortion, _session.Strength) <= 0f)
+        {
+            SuspendCamera();
+            _cameraEffect?.Release();
+        }
+        if (Plugin.Api.EffectStrength(EffectType.Apparitions, _session.Strength) <= 0f)
+        {
+            foreach (var apparition in _apparitions) apparition.Dispose();
+            _apparitions.Clear();
+        }
+    }
+#endif
 
     private void ClearVisuals()
     {

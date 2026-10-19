@@ -39,28 +39,43 @@ draft="$(gh api --paginate "repos/$repo/releases" --jq ".[] | select(.tag_name =
 
 make package
 [[ -z "$(git status --porcelain)" && "$(git rev-parse HEAD)" == "$head" ]] || fail 'Source changed during the build; refusing to publish.'
-archive="$(cd "${PACKAGE_DIR:-bin}" && pwd)/Nivalis.Cigarette-$RELEASE_TAG.zip"
-checksum="$archive.sha256"
-(cd "$(dirname "$archive")" && sha256sum "$(basename "$archive")" > "$(basename "$checksum")")
+output="$(cd "${PACKAGE_DIR:-bin}" && pwd)"
+assets=()
+for suffix in '' '-API'; do
+    archive="$output/Nivalis.Cigarette-$RELEASE_TAG$suffix.zip"
+    checksum="$archive.sha256"
+    [[ -f "$archive" && -f "$checksum" ]] || fail "Missing release variant: $archive"
+    (cd "$output" && sha256sum --check "$(basename "$checksum")")
+    assets+=("$archive" "$checksum")
+done
 
 # Tag only after the build and checks succeed. Never move an existing tag.
 if ! git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
     git tag -a "$RELEASE_TAG" "$head" -m "Cigarette $RELEASE_TAG"
 fi
 if [[ -z "$remote_tag" ]]; then git push origin "refs/tags/$RELEASE_TAG"; fi
+notes=(--generate-notes)
+if [[ -f "docs/releases/$RELEASE_TAG.md" ]]; then notes=(--notes-file "docs/releases/$RELEASE_TAG.md"); fi
 if [[ "$draft" == true ]]; then
-    gh release upload "$RELEASE_TAG" "$archive" "$checksum" --repo "$repo" --clobber
+    gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$repo" --clobber
 else
-    gh release create "$RELEASE_TAG" "$archive" "$checksum" --repo "$repo" \
-        --draft --verify-tag --title "Cigarette $RELEASE_TAG" --generate-notes
+    gh release create "$RELEASE_TAG" "${assets[@]}" --repo "$repo" \
+        --draft --verify-tag --title "Cigarette $RELEASE_TAG" "${notes[@]}"
+fi
+
+if [[ "$draft" == true && -f "docs/releases/$RELEASE_TAG.md" ]]; then
+    gh release edit "$RELEASE_TAG" --repo "$repo" --notes-file "docs/releases/$RELEASE_TAG.md"
 fi
 
 # Verify the actual uploaded bytes before making the release public.
 verify_dir="$(mktemp -d)"
 trap 'rm -rf -- "$verify_dir"' EXIT
-gh release download "$RELEASE_TAG" --repo "$repo" --dir "$verify_dir" \
-    --pattern "$(basename "$archive")" --pattern "$(basename "$checksum")"
-cmp "$checksum" "$verify_dir/$(basename "$checksum")"
-(cd "$verify_dir" && sha256sum --check "$(basename "$checksum")")
+patterns=()
+for asset in "${assets[@]}"; do patterns+=(--pattern "$(basename "$asset")"); done
+gh release download "$RELEASE_TAG" --repo "$repo" --dir "$verify_dir" "${patterns[@]}"
+for asset in "${assets[@]}"; do cmp "$asset" "$verify_dir/$(basename "$asset")"; done
+for suffix in '' '-API'; do
+    (cd "$verify_dir" && sha256sum --check "Nivalis.Cigarette-$RELEASE_TAG$suffix.zip.sha256")
+done
 gh release edit "$RELEASE_TAG" --repo "$repo" --draft=false
 gh release view "$RELEASE_TAG" --repo "$repo" --json url --jq .url

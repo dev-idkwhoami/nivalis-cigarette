@@ -1,4 +1,7 @@
 using BepInEx;
+#if CIGARETTE_API
+using NivalisMods.Cigarette.Api;
+#endif
 using System.IO;
 using BepInEx.Configuration;
 using BepInEx.Logging;
@@ -11,9 +14,12 @@ namespace NivalisMods.Cigarette;
 [BepInPlugin(Id, "Cigarette", Version)]
 public sealed class Plugin : BasePlugin
 {
-    public const string Version = "1.2.0";
+    public const string Version = "1.3.0";
     public const string Id = "local.nivalis.cigarette";
     internal static ManualLogSource Logger = null!;
+#if CIGARETTE_API
+    internal static ApiService Api = null!;
+#endif
     internal const float DefaultInhaleVolume = 0.01f;
     internal const float DefaultMaskInhaleVolume = 0.125f;
     internal const float DefaultExhaleVolume = 0.025f;
@@ -70,7 +76,13 @@ public sealed class Plugin : BasePlugin
         settings.SaveOnConfigSet = true;
         new Harmony(Id).PatchAll(typeof(Plugin).Assembly);
         ClassInjector.RegisterTypeInIl2Cpp<HighCameraEffect>();
+#if CIGARETTE_API
+        Api = new ApiService(new GameApiRuntime(), e => Logger.LogError("Cigarette API subscriber failed: " + e));
+#endif
         AddComponent<SmokingController>();
+#if CIGARETTE_API
+        CigaretteApi.Register(Api);
+#endif
         Log.LogInfo($"Cigarette {Version}: Left-click a nearby railing to choose cigarette, joint or inhalant mask. Movement and Escape cancel.");
     }
 }

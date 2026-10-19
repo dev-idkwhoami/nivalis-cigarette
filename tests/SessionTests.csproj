@@ -5,6 +5,8 @@
     <OutputPath>bin/</OutputPath>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../api/Cigarette.Api.csproj" />
+    <Compile Include="../src/ApiService.cs" Link="ApiService.cs" />
     <Compile Include="../src/RailApproachMotion.cs" Link="RailApproachMotion.cs" />
     <Compile Include="../src/BoatRailLayout.cs" Link="BoatRailLayout.cs" />
     <Compile Include="../src/MaskSlowMotion.cs" Link="MaskSlowMotion.cs" />

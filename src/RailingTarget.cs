@@ -41,10 +41,19 @@ internal static class RailingTarget
         if (!IsRecognizedRail(hit.collider)) return false;
         if (!TryTop(character, hit.collider, hit.point, maximum, out hit, out reason)) return false;
         reason = "Cannot establish the railing facing direction";
-        if (!TryFacing(character, hit, out var facing)) return false;
+        if (!TryNearSide(character, hit, out var facing, out var sidePoint)) return false;
         reason = "Face within 35 degrees of perpendicular to the railing";
         var look = Vector3.ProjectOnPlane(eye.forward, Vector3.up);
         if (look.sqrMagnitude < 0.001f || Vector3.Angle(look, facing) > RailApproachMotion.MaximumAngle) return false;
+        // Retain the selected location along the rail, normalize only its depth.
+        // Re-probe the actual top so this never invents a contact in empty space
+        // or switches to another collider when the rail is thin/irregular.
+        var shift = RailApproachMotion.NearEdgeShift(Vector3.Dot(hit.point - sidePoint, facing));
+        if (shift > 0f)
+        {
+            var contact = hit.point - facing * shift;
+            if (!TryTop(character, hit.collider, contact, maximum, out hit, out reason)) return false;
+        }
         reason = "Eligible railing target";
         return true;
     }
@@ -75,8 +84,12 @@ internal static class RailingTarget
     // Probe its near side just below the verified top, never infer from a combined
     // building mesh's bounds or the player's current viewing direction.
     internal static bool TryFacing(PlayerCharacter character, RaycastHit top, out Vector3 facing)
+        => TryNearSide(character, top, out facing, out _);
+
+    private static bool TryNearSide(PlayerCharacter character, RaycastHit top, out Vector3 facing, out Vector3 sidePoint)
     {
         facing = default;
+        sidePoint = default;
         var toward = Vector3.ProjectOnPlane(top.point - character.transform.position, Vector3.up);
         if (toward.sqrMagnitude < 0.001f) return false;
         foreach (var inset in new[] { 0.008f, 0.02f, 0.05f })
@@ -87,6 +100,7 @@ internal static class RailingTarget
             var normal = Vector3.ProjectOnPlane(side.normal, Vector3.up);
             if (normal.sqrMagnitude < 0.5f || Mathf.Abs(side.normal.y) > 0.5f) continue;
             facing = -normal.normalized;
+            sidePoint = side.point;
             return true;
         }
         return false;

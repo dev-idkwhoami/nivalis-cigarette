@@ -1,4 +1,10 @@
 using NivalisMods.Cigarette;
+if (args.Length == 4 && args[0] == "--check-archive")
+{
+    ArchiveChecks.Run(args[1], args[2], args[3]);
+    return;
+}
+ApiChecks.Run();
 // Time ownership must restore non-default speed and preserve an external pause.
 var slow = new MaskSlowMotion();
 var slowTime = slow.Apply(0.8f, 0.02f, 1f, 0.35f);
@@ -312,6 +318,24 @@ if (args.Length >= 1)
     var packaged = System.Reflection.Assembly.LoadFile(Path.GetFullPath(args[0]));
     if (args.Length >= 2 && packaged.GetName().Version != new Version(args[1] + ".0"))
         throw new Exception("Shipped assembly version does not match release version");
+    if (args.Length >= 3)
+    {
+        var expectApi = args[2] switch
+        {
+            "api" => true,
+            "standalone" => false,
+            _ => throw new Exception("Unknown package variant")
+        };
+        var referencesApi = packaged.GetReferencedAssemblies().Any(a => a.Name == "Nivalis.Cigarette.Api");
+        if (referencesApi != expectApi) throw new Exception("Packaged API dependency does not match variant");
+        using var assemblyStream = File.OpenRead(Path.GetFullPath(args[0]));
+        using var pe = new System.Reflection.PortableExecutable.PEReader(assemblyStream);
+        var metadata = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(pe);
+        var hasService = metadata.TypeDefinitions.Any(handle =>
+            metadata.GetString(metadata.GetTypeDefinition(handle).Name) == "ApiService");
+        if (hasService != expectApi) throw new Exception("Packaged API implementation does not match variant");
+        Console.WriteLine($"PASS: {args[2]} assembly API reference and implementation isolation.");
+    }
     foreach (var icon in new[] { "cigarette.png", "joint.png", "mask.png" })
     {
         using var stream = packaged.GetManifestResourceStream("Cigarette.Icons." + icon)
@@ -415,3 +439,55 @@ foreach (var startRatio in new[] { 0.1f, 0.5f, 0.88f, 1.3f })
         throw new Exception("Too-close player did not move back");
 }
 Console.WriteLine("PASS: approach and retreat converge on the same proportional stand-off; already positioned players stay put.");
+
+// Short adjustments must recover when native movement drops sub-millimetre
+// steps. Cover both directions, including the 26–28 mm plans from the live log.
+foreach (var fps in new[] { 60, 144, 240, 360 })
+foreach (var travel in new[] { 0.026f, 0.028f, 0.15f })
+foreach (var direction in new[] { -1f, 1f })
+foreach (var threshold in new[] { 0.001f, 0.002f, 0.004f })
+{
+    const float reach = 0.45f;
+    var goal = RailApproachMotion.StandOff(reach);
+    var position = goal + direction * travel;
+    var dt = 1f / fps;
+    for (var elapsed = dt; elapsed < 2f; elapsed += dt)
+    {
+        var remaining = Math.Abs(position - goal);
+        if (RailApproachMotion.PositionReady(remaining, position, reach)) break;
+        var step = RailApproachMotion.Step(travel, remaining, elapsed, dt);
+        if (step < 0f || step > remaining) throw new Exception("Recovery step overshot target");
+        if (step >= threshold) position += Math.Sign(goal - position) * step;
+    }
+    if (!RailApproachMotion.PositionReady(Math.Abs(position - goal), position, reach))
+        throw new Exception($"Short approach/retreat stalled: fps={fps}, travel={travel}, direction={direction}, threshold={threshold}");
+}
+Console.WriteLine("PASS: short approaches and retreats recover dropped native steps at 60–360 FPS.");
+
+// Clicking deeper onto a wide rail must leave the same standing destination.
+// A simulated capsule is blocked 36 cm from its near face, as in the live stall.
+foreach (var clickedDepth in new[] { 0.02f, 0.08f, 0.14f, 0.20f })
+{
+    var contact = clickedDepth - RailApproachMotion.NearEdgeShift(clickedDepth);
+    Near(contact, 0.02f, "Near/far clicks produce the same near-edge contact");
+    var destination = contact - RailApproachMotion.StandOff(0.45f);
+    if (destination > -0.36f) throw new Exception("Far-edge click put the standing destination inside the collision clearance");
+    var actual = Math.Min(destination, -0.36f);
+    if (!RailApproachMotion.ReachablePlacement(0f, contact - actual, 0.45f))
+        throw new Exception("Near-edge contact is not reachable from valid standing placement");
+}
+Near(RailApproachMotion.NearEdgeShift(0.008f), 0f, "Thin rail contact stays on its original top");
+if (!RailApproachMotion.CanSettle(0.027f, 0.423f, 0.45f) ||
+    !RailApproachMotion.ReachablePlacement(0f, 0.423f, 0.45f))
+    throw new Exception("Recorded in-reach stall should settle and start instead of aborting");
+if (RailApproachMotion.CanSettle(0.093f, 0.489f, 0.45f) ||
+    RailApproachMotion.ReachablePlacement(0f, 0.489f, 0.45f))
+    throw new Exception("Final alignment must not authorize the recorded out-of-reach contact");
+foreach (var reach in new[] { 0.2f, 0.45f, 0.65f })
+{
+    if (RailApproachMotion.CanSettle(reach * 0.3f, reach * 0.8f, reach) ||
+        RailApproachMotion.ReachablePlacement(reach * 0.1f, reach * 0.9f, reach) ||
+        RailApproachMotion.ReachablePlacement(0f, reach * 0.5f, reach))
+        throw new Exception("Settling must not accept a large displacement, lateral error or too-close placement");
+}
+Console.WriteLine("PASS: near-edge anchoring, thin rails, final alignment and recorded collision-limited reach cases.");

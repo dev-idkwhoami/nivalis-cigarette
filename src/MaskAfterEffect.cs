@@ -1,4 +1,7 @@
 using Nivalis;
+#if CIGARETTE_API
+using NivalisMods.Cigarette.Api;
+#endif
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -27,23 +30,46 @@ internal sealed class MaskAfterEffect
     {
         if (_scene == SceneManager.GetActiveScene().handle &&
             _player == PlayerManager._instance?.LocalPlayer?.Character?.GetInstanceID())
+#if CIGARETTE_API
+            _session.Credit(burn, duration, Plugin.Api.Effects.IsAutomaticEffectsEnabled(SmokingItem.InhalantMask) ? Plugin.MaskDurationMultiplier.Value : 0f);
+#else
             _session.Credit(burn, duration, Plugin.MaskDurationMultiplier.Value);
+#endif
     }
 
     internal void Tick(bool gameplay, bool holdingSmoke)
     {
-        if (_session.Remaining <= 0f) { Suspend(); return; }
         if (_scene != SceneManager.GetActiveScene().handle ||
             _player != PlayerManager._instance?.LocalPlayer?.Character?.GetInstanceID())
-        { Clear(); return; }
+        {
+            Clear();
+#if CIGARETTE_API
+            if (!Plugin.Api.HasDirectEffect(EffectType.InhalantSlowMotion)) return;
+            var player = PlayerManager._instance?.LocalPlayer?.Character;
+            if (player == null) return;
+            _scene = SceneManager.GetActiveScene().handle; _player = player.GetInstanceID();
+#else
+            return;
+#endif
+        }
         if (!gameplay || holdingSmoke) { Suspend(); return; }
         // Real seconds keep the duration independent of the world speed selected.
         _session.Tick(Time.unscaledDeltaTime, false);
         _fade = Mathf.Min(1f, _fade + Time.unscaledDeltaTime / 0.4f);
         var strength = Mathf.Min(_fade, _session.Remaining / 0.4f);
         strength = strength * strength * (3f - 2f * strength);
+#if CIGARETTE_API
+        strength = Plugin.Api.EffectStrength(EffectType.InhalantSlowMotion, strength);
+#endif
         SetTime(_slow.Apply(Time.timeScale, Time.fixedDeltaTime, strength, Plugin.MaskWorldSpeed.Value));
     }
+
+#if CIGARETTE_API
+    internal void RefreshPermissions()
+    {
+        if (Plugin.Api.EffectStrength(EffectType.InhalantSlowMotion, _session.Remaining > 0 ? 1f : 0f) <= 0f) Suspend();
+    }
+#endif
 
     internal void Suspend()
     {

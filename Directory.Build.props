@@ -10,4 +10,12 @@
     <GenerateDependencyFile>false</GenerateDependencyFile>
     <GamePath Condition="'$(GamePath)' == ''">$(NIVALIS_GAME_PATH)</GamePath>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Cigarette'">
+    <EnableApi Condition="'$(EnableApi)' == ''">false</EnableApi>
+    <BuildFlavor Condition="'$(EnableApi)' == 'true'">api</BuildFlavor>
+    <BuildFlavor Condition="'$(EnableApi)' != 'true'">standalone</BuildFlavor>
+    <BaseIntermediateOutputPath>$(MSBuildProjectDirectory)/obj/$(BuildFlavor)/</BaseIntermediateOutputPath>
+    <OutputPath>$(MSBuildProjectDirectory)/../bin/$(BuildFlavor)/</OutputPath>
+    <DefaultItemExcludes>$(DefaultItemExcludes);$(MSBuildProjectDirectory)/obj/**</DefaultItemExcludes>
+  </PropertyGroup>
 </Project>

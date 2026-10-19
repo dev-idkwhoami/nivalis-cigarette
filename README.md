@@ -159,8 +159,16 @@ make test
 ```
 
 Use your game directory, or export `NIVALIS_GAME_PATH`. Output is
-`bin/Nivalis.Cigarette.dll`. Tests cover session timing, cigarette burn and audio
-processing; they do not require the game or validate Unity interactions.
+`bin/standalone/Nivalis.Cigarette.dll`. Use `make build-api` for the API-enabled
+variant in `bin/api/`. Tests cover session timing, cigarette burn, audio and the
+API contract; they do not require the game or validate Unity interactions.
+
+`make install` installs the standalone variant; `make install-api` installs the
+API-enabled variant and its API library. Both variants use the same mod DLL name
+and plugin ID. Install only one variant at a time; changing variants replaces
+`BepInEx/plugins/Nivalis.Cigarette.dll`. Standalone installation does not remove a
+previously installed shared API library, because cooperating mods may reference
+that library even when no provider is present.
 
 The Makefile uses `dotnet` from PATH or `.tools/dotnet/dotnet` when present.
 Override with `DOTNET=...`. Builds default to `CONFIGURATION=Release`.
@@ -172,14 +180,29 @@ Local caches stay in `.tools/`. `make clean` removes generated build output.
 make package GAME_PATH="../Nivalis Nights"
 ```
 
-Builds, checks embedded audio and assembly version, and creates
-`bin/Nivalis.Cigarette-<version>.zip` plus a SHA-256 file. Override the output directory
-with `PACKAGE_DIR=...`. ZIP creation uses the .NET SDK; Python is not required.
-The archive contains only:
+Builds and checks both variants, then creates two archives and a SHA-256 file
+for each:
 
-```text
-BepInEx/plugins/Nivalis.Cigarette.dll
-```
+| Archive | For players using | Contents under `BepInEx/plugins/` |
+| --- | --- | --- |
+| `Nivalis.Cigarette-<version>.zip` | Cigarette on its own | Standalone `Nivalis.Cigarette.dll` |
+| `Nivalis.Cigarette-<version>-API.zip` | Cooperating mods that use the Cigarette API | API-enabled `Nivalis.Cigarette.dll` and `Nivalis.Cigarette.Api.dll` |
+
+The standalone build excludes the API implementation, registration, event
+tracking and API assembly reference. It retains normal smoking, the wheel and
+built-in after-effects. The API-enabled build adds the integration described in
+[API.md](API.md). Installing the API library alone does not enable integration in
+the standalone build: `TryGetInstance` will return false.
+
+Use `make package-standalone` or `make package-api` to build just one archive.
+Archives go to `bin/`; override this with `PACKAGE_DIR=...`. ZIP creation uses the
+.NET SDK; Python is not required. Packaging checks the selected assembly's API
+dependency and implementation, embedded assets and version, then verifies the
+ZIP's exact file list and bytes against the selected build output.
+
+The source project accepts `-p:EnableApi=false` (default) or `-p:EnableApi=true`.
+Separate `bin/standalone`, `bin/api`, `src/obj/standalone` and `src/obj/api` paths
+keep compiled outputs and restore metadata from crossing between variants.
 
 ## Publish a release
 
@@ -191,7 +214,7 @@ make deploy GAME_PATH="../Nivalis Nights"
 ```
 
 Deployment requires a clean checkout, runs checks and creates a missing version
-tag. It uploads the ZIP and checksum to a draft, verifies the downloaded assets,
+tag. It uploads both ZIPs and their checksums to a draft, verifies all downloaded assets,
 then publishes. Existing tags are never moved and published releases are not
 overwritten. Deployment pushes tags, not branches.
 
@@ -221,3 +244,12 @@ Use the optional, separate `Nivalis.Cigarette.RailDev.dll` to capture unsupporte
 surfaces and toggle exact-object trial rules without rebuilding. It is never part
 of the release ZIP. See [local rail development](docs/rail-development.md) for
 1–4 hotkeys, captures, trial overrides, and opt-in build/install commands.
+
+## Mod integration API
+
+Cigarette provides an optional API so other mods can integrate with its smoking
+sessions, react to consumption, control item availability, and manage effects.
+Players using cooperating mods should install the `-API.zip` variant; everyone
+else can use the standalone download.
+
+For setup, method/event descriptions, and examples, see the [API documentation](API.md).

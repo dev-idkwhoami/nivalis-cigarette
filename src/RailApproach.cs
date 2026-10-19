@@ -17,6 +17,7 @@ internal sealed class RailApproach : IDisposable
     private readonly Vector3 _localFacing;
     private readonly int _scene;
     private float _elapsed, _moved;
+    private bool _settled;
     private OverrideableBool.OverrideLock? _movement, _interaction;
     internal SmokeKind Kind { get; }
     internal RaycastHit Top { get; private set; }
@@ -43,6 +44,9 @@ internal sealed class RailApproach : IDisposable
         _interaction = _character.Interaction.DisableInteractions(owner);
         _character.Controller.StopMovement();
         RailPrompt.Release();
+        Plugin.Logger.LogInfo($"Smoking alignment: scene={SceneManager.GetActiveScene().name}, planned={_travel:F3} m, " +
+            $"position={_character.transform.position}, target={Top.point}, standOff={_standOff:F3} m, " +
+            $"nativeMinMove={_character.Controller.CharacterController?.minMoveDistance ?? -1f:F5} m.");
     }
 
     // -1 cancelled, 0 moving, 1 ready. A blocked path never teleports the player.
@@ -76,6 +80,31 @@ internal sealed class RailApproach : IDisposable
         var remaining = offset.magnitude;
         var maximum = RailingTarget.MaximumDistance;
         var contactDistance = Vector3.ProjectOnPlane(top.point - _character.transform.position, Vector3.up).magnitude;
+        if (!_settled && progress >= 1f && RailApproachMotion.CanSettle(remaining, contactDistance, maximum))
+        {
+            _settled = true;
+            // Finish a small adjustment in one native move. Temporarily remove
+            // only Unity's minimum-step filter; native placement/ground checks,
+            // collision and boat-local coordinate updates still run normally.
+            var controller = _character.Controller.CharacterController;
+            var minimum = controller != null ? controller.minMoveDistance : 0f;
+            var before = _character.transform.position;
+            try
+            {
+                if (controller != null) controller.minMoveDistance = 0f;
+                _character.Controller.Move(offset);
+            }
+            finally { if (controller != null) controller.minMoveDistance = minimum; }
+            _moved += Vector3.ProjectOnPlane(_character.transform.position - before, Vector3.up).magnitude;
+            offset = Vector3.ProjectOnPlane(top.point - facing * _standOff - _character.transform.position, Vector3.up);
+            remaining = offset.magnitude;
+            contactDistance = Vector3.ProjectOnPlane(top.point - _character.transform.position, Vector3.up).magnitude;
+            Plugin.Logger.LogInfo($"Smoking final alignment: remaining={remaining:F3} m, contact={contactDistance:F3} m.");
+        }
+        // A collision-limited adjustment can still leave a perfectly reachable,
+        // aligned contact. Do not cancel merely for missing the ideal stand-off.
+        var lateral = (offset - facing * Vector3.Dot(offset, facing)).magnitude;
+        if (_settled && RailApproachMotion.ReachablePlacement(lateral, contactDistance, maximum)) return 1;
         if (RailApproachMotion.PositionReady(remaining, contactDistance, maximum))
         {
             // Already close enough: finish turning without issuing tiny Move calls.
@@ -91,7 +120,8 @@ internal sealed class RailApproach : IDisposable
             _moved += Vector3.ProjectOnPlane(_character.transform.position - before, Vector3.up).magnitude;
         }
         if (_elapsed < 2f && _moved <= RailApproachMotion.MovementBudget(_travel, maximum)) return 0;
-        Plugin.Logger.LogInfo($"Smoking approach cancelled: remaining={remaining:F3} m, planned={_travel:F3} m, moved={_moved:F3} m.");
+        Plugin.Logger.LogInfo($"Smoking approach cancelled: remaining={remaining:F3} m, planned={_travel:F3} m, moved={_moved:F3} m, " +
+            $"contact={contactDistance:F3} m, lastStep={step:F5} m, frameTime={Time.unscaledDeltaTime:F5} s.");
         return -1;
     }
 

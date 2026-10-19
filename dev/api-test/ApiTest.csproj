@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Nivalis.Cigarette.ApiTest</AssemblyName>
+    <OutputPath>$(MSBuildProjectDirectory)/bin/</OutputPath>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../api/Cigarette.Api.csproj" />
+    <Reference Include="BepInEx.Core" HintPath="$(GamePath)/BepInEx/core/BepInEx.Core.dll" Private="false" />
+    <Reference Include="BepInEx.Unity.IL2CPP" HintPath="$(GamePath)/BepInEx/core/BepInEx.Unity.IL2CPP.dll" Private="false" />
+    <Reference Include="Il2CppInterop.Runtime" HintPath="$(GamePath)/BepInEx/core/Il2CppInterop.Runtime.dll" Private="false" />
+    <Reference Include="$(GamePath)/BepInEx/interop/*.dll" Private="false" />
+  </ItemGroup>
+</Project>

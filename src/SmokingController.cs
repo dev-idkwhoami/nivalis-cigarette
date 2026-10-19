@@ -1,4 +1,7 @@
 using HarmonyLib;
+#if CIGARETTE_API
+using NivalisMods.Cigarette.Api;
+#endif
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.Attributes;
 using Nivalis;
@@ -16,6 +19,10 @@ public sealed class SmokingController : MonoBehaviour
     internal static SmokingController? Instance;
     private PlayerHandsAnimator? _hands;
     private bool _active, _exiting;
+    private SmokingEndReason _endReason;
+#if CIGARETTE_API
+    private int _effectScene = -1, _effectPlayer;
+#endif
     private RailApproach? _approach;
     private readonly List<DroppedCigarette> _drops = new();
     private StanceControl? _stance;
@@ -58,7 +65,13 @@ public sealed class SmokingController : MonoBehaviour
     {
         try
         {
+#if CIGARETTE_API
+            SynchronizeEffectContext();
+#endif
             CreditAfterEffects();
+#if CIGARETTE_API
+            if (GameplayAvailable() && !_active) Plugin.Api.TickEffects(Time.unscaledDeltaTime);
+#endif
             _maskEffect.Tick(GameplayAvailable(), _active);
             _high.Tick(GameplayAvailable(), _active && _blunt, _active);
             for (var i = _drops.Count - 1; i >= 0; i--)
@@ -73,25 +86,30 @@ public sealed class SmokingController : MonoBehaviour
                     _approach = null;
                     approach.Dispose();
                     if (result > 0) StartSmoking(approach.Kind, approach.Top);
+#if CIGARETTE_API
+                    else Plugin.Api.End(SmokingEndReason.UserCancelled, "Approach cancelled, obstructed, or gameplay changed.");
+#endif
                 }
                 return;
             }
             var choice = _wheel.Tick();
             if (choice.HasValue)
             {
+#if CIGARETTE_API
+                var result = Plugin.Api.Sessions.TryStart((SmokingItem)choice.Value);
+                if (!result.Success) Notice(result.Message);
+#else
                 if (CanSmokeAtRail())
                 {
                     var character = PlayerManager._instance.LocalPlayer.Character;
-                    if (RailingTarget.TryCandidate(character, out var top, out _))
+                    if (RailingTarget.TryCandidate(character, out var top, out _) &&
+                        RailingTarget.TryFacing(character, top, out var facing))
                     {
-                        if (RailingTarget.TryFacing(character, top, out var facing))
-                        {
-                            var approach = new RailApproach(character, top, facing, choice.Value);
-                            _approach = approach;
-                            approach.Begin(this);
-                        }
+                        _approach = new RailApproach(character, top, facing, choice.Value);
+                        _approach.Begin(this);
                     }
                 }
+#endif
                 return;
             }
             if (_wheel.Busy) return;
@@ -99,11 +117,14 @@ public sealed class SmokingController : MonoBehaviour
                 PlayerManager._instance?.LocalPlayer?.Character?.Controller?.HandsAnimator != _hands ||
                 UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle != _scene))
             {
-                Stop(null);
+                Stop(null, SmokingEndReason.SceneChanged);
                 return;
             }
             if (_active && (!_exiting && (!GameplayAvailable() || (_kind == SmokeKind.Mask ? Time.unscaledTime : Time.time) - _started >= (_session?.Duration ?? 60f) ||
-                Gamepad.current?.leftStick.ReadValue().sqrMagnitude > 0.1f))) BeginExit();
+                Gamepad.current?.leftStick.ReadValue().sqrMagnitude > 0.1f)))
+                BeginExit(!GameplayAvailable() ? SmokingEndReason.GameplayUnavailable :
+                    (_kind == SmokeKind.Mask ? Time.unscaledTime : Time.time) - _started >= (_session?.Duration ?? 60f)
+                        ? SmokingEndReason.Completed : SmokingEndReason.UserCancelled);
             if (_exiting)
             {
                 if (!GameplayAvailable()) { _hud?.Restore(); _hud = null; }
@@ -111,7 +132,7 @@ public sealed class SmokingController : MonoBehaviour
                 {
                     // A stalled frame must not skip the release and destroy the held prop instead.
                     if (_cigarette != null && _hands != null) { Evaluate(_hands); DropCigarette(); }
-                    Stop(null);
+                    Stop(null, _endReason);
                 }
                 return;
             }
@@ -132,12 +153,114 @@ public sealed class SmokingController : MonoBehaviour
             _maskEffect.Clear();
             Stop("Smoking failed; see the Cigarette log.");
         }
+#if CIGARETTE_API
+        finally { Plugin.Api.DispatchEvents(); }
+#endif
     }
+
+#if CIGARETTE_API
+    [HideFromIl2Cpp]
+    private void FailStart(ResultCode code, string message)
+    {
+        Plugin.Api.End(SmokingEndReason.Failed, message, code);
+        Notice(message);
+    }
+
+    [HideFromIl2Cpp]
+    internal ApiResult ValidatePosition()
+    {
+        var character = PlayerManager._instance?.LocalPlayer?.Character;
+        if (character?.Controller?.HandsAnimator == null || character.Controller.Camera == null)
+            return new(ResultCode.NotReady, "No player hands/camera.");
+        return RailingTarget.TryCandidate(character, out _, out var reason)
+            ? new(ResultCode.Success) : new(ResultCode.InvalidPosition, reason);
+    }
+
+    [HideFromIl2Cpp]
+    internal ApiResult ValidateStart(SmokeKind kind)
+    {
+        if (_active || _approach != null || _wheel.Busy) return new(ResultCode.Busy, "Smoking or the smoking wheel is already active.");
+        if (!GameplayAvailable()) return new(ResultCode.GameplayUnavailable, "Gameplay is paused, unfocused, or blocked by UI.");
+        var position = ValidatePosition();
+        if (!position.Success) return position;
+        if (!CanSmokeAtRail()) return new(ResultCode.PlayerNotReady, "Stand idle on foot with empty hands and no active interaction.");
+        if (kind == SmokeKind.Mask && !MaskModel.Available()) return new(ResultCode.AssetsUnavailable, "Inhalant mask assets are not loaded here.");
+        if (!Resources.FindObjectsOfTypeAll<AnimationClip>().Any(c => c.name == IdleClip))
+            return new(ResultCode.AssetsUnavailable, "Smoking animation is not loaded here.");
+        return new(ResultCode.Success);
+    }
+
+    [HideFromIl2Cpp]
+    internal ApiResult TryStart(SmokeKind kind)
+    {
+        var validation = ValidateStart(kind);
+        if (!validation.Success) return validation;
+        var character = PlayerManager._instance.LocalPlayer.Character;
+        if (!RailingTarget.TryCandidate(character, out var top, out var reason) ||
+            !RailingTarget.TryFacing(character, top, out var facing)) return new(ResultCode.InvalidPosition, reason);
+        var id = Plugin.Api.Accept((SmokingItem)kind, Plugin.Api.Items.GetSettings((SmokingItem)kind).SessionDurationSeconds);
+        try
+        {
+            _approach = new RailApproach(character, top, facing, kind);
+            _approach.Begin(this);
+            return new(ResultCode.Success, "Approach accepted; wait for SmokingStarted.", id);
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger.LogError(e);
+            Stop("Failed to begin smoking approach.");
+            return new(ResultCode.Failed, "Failed to begin smoking approach.", id);
+        }
+    }
+
+    [HideFromIl2Cpp]
+    internal ApiResult StopFromApi()
+    {
+        if (_approach != null) Stop(null, SmokingEndReason.ApiStopped);
+        else if (_active) BeginExit(SmokingEndReason.ApiStopped);
+        return new(ResultCode.Success);
+    }
+
+    [HideFromIl2Cpp]
+    internal void AvailabilityChanged(SmokeKind kind)
+    {
+        if (_wheel.Busy) _wheel.Close(); // Reopen with the new global state; stale selections cannot start.
+        if (_approach?.Kind == kind && Plugin.Api.Items.GetAvailability((SmokingItem)kind) != ItemAvailability.Available)
+            Stop(null, SmokingEndReason.AvailabilityChanged);
+        RailPrompt.Release();
+    }
+
+    [HideFromIl2Cpp]
+    internal void RefreshEffects()
+    {
+        SynchronizeEffectContext();
+        _high.RefreshPermissions();
+        _maskEffect.RefreshPermissions();
+    }
+
+    [HideFromIl2Cpp]
+    private void SynchronizeEffectContext()
+    {
+        var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle;
+        var player = PlayerManager._instance?.LocalPlayer?.Character?.GetInstanceID() ?? 0;
+        if (_effectScene == scene && _effectPlayer == player) return;
+        if (_effectScene != -1) Plugin.Api.ClearDirectEffects();
+        _high.Dispose(); _maskEffect.Clear();
+        _effectScene = scene; _effectPlayer = player;
+    }
+#endif
 
     [HideFromIl2Cpp]
     private void StartSmoking(SmokeKind kind, RaycastHit target)
     {
+#if CIGARETTE_API
+        if (Plugin.Api.Items.GetAvailability((SmokingItem)kind) != ItemAvailability.Available)
+        { Plugin.Api.End(SmokingEndReason.AvailabilityChanged, "Item was disabled during approach.", ResultCode.ItemDisabled); return; }
+        if (!GameplayAvailable())
+        { Plugin.Api.End(SmokingEndReason.GameplayUnavailable, "Gameplay unavailable.", ResultCode.GameplayUnavailable); return; }
+#else
         Stop(null);
+#endif
         var character = PlayerManager._instance.LocalPlayer.Character;
         var hands = character.Controller.HandsAnimator;
         if (hands == null || !character.Controller.CanMove || !character.CanEquipItem ||
@@ -145,32 +268,52 @@ public sealed class SmokingController : MonoBehaviour
             hands.IsSitting || hands.IsPlayingMealAnimation || hands.sleeping || hands.placingItem ||
             hands.IsHoldingTray || hands.Snapped || hands.Animator.GetBool(PlayerHandsAnimator.Param.Fishing))
         {
+#if CIGARETTE_API
+            FailStart(ResultCode.PlayerNotReady, "Stand on foot with empty hands before smoking.");
+#else
             Notice("Stand on foot with empty hands before smoking.");
+#endif
             return;
         }
         if (!RailingTarget.TryTop(character, target.collider, target.point,
             RailingTarget.MaximumDistance, out var railTop, out var targetReason))
         {
+#if CIGARETTE_API
+            FailStart(ResultCode.InvalidPosition, "Smoking setup cancelled: " + targetReason);
+#else
             Notice("Smoking setup cancelled: " + targetReason);
+#endif
             return;
         }
         if (kind == SmokeKind.Mask && !MaskModel.Available())
         {
+#if CIGARETTE_API
+            FailStart(ResultCode.AssetsUnavailable, "City inhalant-mask assets are not loaded here. Try a populated street.");
+#else
             Notice("City inhalant-mask assets are not loaded here. Try a populated street.");
+#endif
             return;
         }
         var clipName = IdleClip;
         var clip = Resources.FindObjectsOfTypeAll<AnimationClip>().FirstOrDefault(c => c.name == clipName);
         if (clip == null)
         {
+#if CIGARETTE_API
+            FailStart(ResultCode.AssetsUnavailable, "Smoking clip is not loaded here. Try a populated street.");
+#else
             Notice("Smoking clip is not loaded here. Try a populated street.");
+#endif
             Plugin.Logger.LogWarning("Missing loaded clip: " + clipName);
             return;
         }
         var animator = hands.Animator;
         if (animator.IsInTransition(0) || animator.GetCurrentAnimatorStateInfo(0).fullPathHash != Animator.StringToHash(IdleState))
         {
+#if CIGARETTE_API
+            FailStart(ResultCode.PlayerNotReady, "Wait until your hands are idle before smoking.");
+#else
             Notice("Wait until your hands are idle before smoking.");
+#endif
             return;
         }
         if (animator.runtimeAnimatorController == null || !animator.HasState(0, Animator.StringToHash(IdleState)) ||
@@ -213,8 +356,12 @@ public sealed class SmokingController : MonoBehaviour
         foreach (var entry in _renderers) entry.Renderer.enabled = true;
         _kind = kind;
         _blunt = kind == SmokeKind.Joint;
+#if CIGARETTE_API
+        var duration = Plugin.Api.Sessions.GetCurrent()!.SessionDurationSeconds;
+#else
         var duration = kind == SmokeKind.Mask ? Plugin.MaskSessionDuration.Value :
             _blunt ? Plugin.CannabisSessionDuration.Value : Plugin.SessionDuration.Value;
+#endif
         _session = new SmokingSession(duration, () => UnityEngine.Random.value);
         if (_blunt) _high.BeginSmoke();
         if (kind == SmokeKind.Mask) _maskEffect.BeginSmoke();
@@ -225,6 +372,7 @@ public sealed class SmokingController : MonoBehaviour
         var movingAnchor = RailSurface.Boat.AnchorFor(railTop.collider);
         if (movingAnchor != null) _stance.Follow(movingAnchor);
         CreateCigarette(animator);
+        if (_cigarette == null) throw new InvalidOperationException("No hand/held item available for smoking.");
         if (_cigarette != null)
         {
             _customDraw = new CustomDraw(hands, character.Controller.Camera.transform, _cigarette.transform, character.Controller.Rotation, character, _session, railTop, _kind);
@@ -234,6 +382,9 @@ public sealed class SmokingController : MonoBehaviour
         _hud = new SmokingHud();
         _hud.Hide();
         Plugin.Logger.LogInfo($"Smoking session started: {_kind}, {_session.Duration} seconds.");
+#if CIGARETTE_API
+        Plugin.Api.Started();
+#endif
     }
 
     [HideFromIl2Cpp]
@@ -338,11 +489,15 @@ public sealed class SmokingController : MonoBehaviour
     }
 
     [HideFromIl2Cpp]
-    private void BeginExit()
+    private void BeginExit(SmokingEndReason reason = SmokingEndReason.UserCancelled)
     {
         if (!_active || _exiting) return;
         CreditAfterEffects();
-        if (_customDraw == null) { Stop(null); return; }
+        _endReason = reason;
+#if CIGARETTE_API
+        Plugin.Api.Finishing();
+#endif
+        if (_customDraw == null) { Stop(null, reason); return; }
         // Snapshot the hands after applying this frame's boat motion.
         if (_stance?.FollowsMovingRail == true && _hands != null) Evaluate(_hands);
         _exiting = true;
@@ -364,7 +519,7 @@ public sealed class SmokingController : MonoBehaviour
     }
 
     [HideFromIl2Cpp]
-    internal void Stop(string? message)
+    internal void Stop(string? message, SmokingEndReason reason = SmokingEndReason.UserCancelled)
     {
         var approach = _approach;
         _approach = null;
@@ -428,6 +583,11 @@ public sealed class SmokingController : MonoBehaviour
             _override = null;
             _originalController = null;
         }
+#if CIGARETTE_API
+        Plugin.Api.End(message != null ? SmokingEndReason.Failed : reason, message ?? "",
+            message != null ? ResultCode.Failed : reason == SmokingEndReason.AvailabilityChanged
+                ? ResultCode.ItemDisabled : ResultCode.ApproachCancelled);
+#endif
         if (message != null) Notice(message);
     }
 
@@ -460,6 +620,9 @@ public sealed class SmokingController : MonoBehaviour
     [HideFromIl2Cpp]
     internal bool CanSmokeAtRail()
     {
+#if CIGARETTE_API
+        if (!Plugin.Api.HasVisibleItems) return false;
+#endif
         if (_active || _approach != null || !GameplayAvailable()) return false;
         var character = PlayerManager._instance.LocalPlayer.Character;
         var hands = character.Controller.HandsAnimator;
@@ -475,14 +638,38 @@ public sealed class SmokingController : MonoBehaviour
     [HideFromIl2Cpp]
     private void CreditAfterEffects()
     {
+#if CIGARETTE_API
+        if (_active && !_exiting && _session != null && _customDraw != null)
+            Plugin.Api.Consume(_customDraw.BurnProgress);
+#endif
         if (_active && _blunt && !_exiting && _session != null && _customDraw != null)
             _high.Credit(_customDraw.BurnProgress, _session.Duration);
         if (_active && _kind == SmokeKind.Mask && !_exiting && _session != null && _customDraw != null)
             _maskEffect.Credit(_customDraw.BurnProgress, _session.Duration);
     }
 
-    public void OnDisable() { RailPrompt.Release(); Stop(null); _high.Dispose(); _maskEffect.Clear(); foreach (var drop in _drops) drop.Dispose(); _drops.Clear(); }
-    public void OnDestroy() { Stop(null); RailSurface.Boat.Dispose(); _wheel.Dispose(); _high.Dispose(); _maskEffect.Clear(); foreach (var drop in _drops) drop.Dispose(); _drops.Clear(); if (Instance == this) Instance = null; }
+    public void OnDisable()
+    {
+        RailPrompt.Release(); Stop(null, SmokingEndReason.ControllerDisabled);
+#if CIGARETTE_API
+        Plugin.Api.ClearDirectEffects();
+#endif
+        _high.Dispose(); _maskEffect.Clear(); foreach (var drop in _drops) drop.Dispose(); _drops.Clear();
+#if CIGARETTE_API
+        Plugin.Api.DispatchEvents();
+#endif
+    }
+    public void OnDestroy()
+    {
+        Stop(null, SmokingEndReason.ControllerDisabled);
+#if CIGARETTE_API
+        Plugin.Api.ClearDirectEffects();
+#endif
+        RailSurface.Boat.Dispose(); _wheel.Dispose(); _high.Dispose(); _maskEffect.Clear(); foreach (var drop in _drops) drop.Dispose(); _drops.Clear(); if (Instance == this) Instance = null;
+#if CIGARETTE_API
+        Plugin.Api.DispatchEvents();
+#endif
+    }
 }
 
 [HarmonyPatch(typeof(PlayerHandsAnimator), nameof(PlayerHandsAnimator.ManualUpdate))]
