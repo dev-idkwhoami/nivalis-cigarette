@@ -10,7 +10,7 @@ using UnityEngine.InputSystem;
 
 namespace NivalisMods.Cigarette.RailDev;
 
-[BepInPlugin(Id, "Cigarette Rail Development", "1.0.0")]
+[BepInPlugin(Id, "Cigarette Rail Development", "1.0.2")]
 [BepInDependency(NivalisMods.Cigarette.Plugin.Id)]
 public sealed class Plugin : BasePlugin
 {
@@ -19,6 +19,8 @@ public sealed class Plugin : BasePlugin
     internal static string Folder = null!;
     internal static string RulesPath => System.IO.Path.Combine(Folder, "trial-rails.json");
     internal static List<RailRule> Rules = new();
+    private Harmony? _harmony;
+    private RailProbe? _probe;
     internal static readonly Type Target = typeof(NivalisMods.Cigarette.Plugin).Assembly.GetType("NivalisMods.Cigarette.RailingTarget", true)!;
     internal static readonly MethodInfo TryTarget = AccessTools.Method(Target, "TryTarget");
     internal static readonly MethodInfo Blocker = AccessTools.Method(Target, "IsReviewedPlayerBlocker");
@@ -31,11 +33,19 @@ public sealed class Plugin : BasePlugin
         Directory.CreateDirectory(Folder);
         try { Rules = RailRules.Read(RulesPath); }
         catch (Exception e) { Log.LogError("Trial rules not loaded: " + e.Message); }
-        var harmony = new Harmony(Id);
+        var harmony = _harmony = new Harmony(Id);
         harmony.Patch(AccessTools.Method(Target, "IsRecognizedRail"), postfix: new HarmonyMethod(typeof(Plugin), nameof(RailPostfix)));
         harmony.Patch(Blocker, postfix: new HarmonyMethod(typeof(Plugin), nameof(BlockerPostfix)));
-        AddComponent<RailProbe>();
+        _probe = AddComponent<RailProbe>();
         Log.LogInfo("LOCAL DEVELOPMENT ONLY. 1 capture; 2 toggle trial rail; 3 toggle blocker bypass; 4 reload. Files: " + Folder);
+    }
+
+    public override bool Unload()
+    {
+        SmokingController.Instance?.Stop(null);
+        if (_probe != null) UnityEngine.Object.Destroy(_probe);
+        _harmony?.UnpatchSelf();
+        return true;
     }
 
     private static void RailPostfix(Collider collider, ref bool __result)
@@ -97,8 +107,15 @@ public sealed class RailProbe : MonoBehaviour
                 Vector3.down, out top, 1f, environment, QueryTriggerInteraction.Ignore);
             var report = new
             {
+                captureVersion = 3,
                 utc = DateTime.UtcNow, eligible, reason, player = Vec(character.transform.position),
                 eye = Vec(eye.position), direction = Vec(eye.forward), environmentMask = environment,
+                surfaces = SurfaceDiagnostics.Capture(character),
+                target = args[1] is RaycastHit selected && selected.collider != null ? new
+                {
+                    identity = Plugin.Identity(selected.collider, "rail"),
+                    point = Vec(selected.point), normal = Vec(selected.normal)
+                } : null,
                 downwardProbe = hasTop ? new
                 {
                     identity = Plugin.Identity(top.collider, "rail"), point = Vec(top.point), normal = Vec(top.normal),
@@ -117,6 +134,11 @@ public sealed class RailProbe : MonoBehaviour
             var file = "capture-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + ".json";
             File.WriteAllText(System.IO.Path.Combine(Plugin.Folder, file), System.Text.Json.JsonSerializer.Serialize(report, RailRules.Json));
             if (key.digit1Key.wasPressedThisFrame) { Notify($"{reason}. Saved {file}"); return; }
+            if (args[1] is RaycastHit boatHit && RailSurface.Boat.AnchorFor(boatHit.collider) != null)
+            {
+                Notify("Boat target is supported by Cigarette. Left-click to smoke. Capture saved.");
+                return;
+            }
             var kind = key.digit3Key.wasPressedThisFrame ? "blocker" : "rail";
             var target = hits.FirstOrDefault(h => (environment & (1 << h.collider.gameObject.layer)) != 0 &&
                 (kind == "blocker" || Plugin.Blocker.Invoke(null, new object[] { h.collider }) is not true));

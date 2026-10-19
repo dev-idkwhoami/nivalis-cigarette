@@ -15,6 +15,10 @@ internal sealed class StanceControl
     private Vector3 _position;
     private Quaternion _rotation;
     private bool _placed;
+    private MovingRailFrame? _movingFrame;
+    internal bool FollowsMovingRail => _movingFrame != null;
+
+    internal void Follow(Transform anchor) => _movingFrame = new MovingRailFrame(anchor);
 
     internal StanceControl(PlayerHandsAnimator hands, PlayerCharacterController controller)
     {
@@ -96,6 +100,17 @@ internal sealed class StanceControl
 
     internal void Apply()
     {
+        if (_movingFrame != null)
+        {
+            var delta = _movingFrame.Advance();
+            _position = delta.After + delta.Rotation * (_position - delta.Before);
+            _rotation = delta.Rotation * _rotation;
+            var yaw = Mathf.DeltaAngle(0f, delta.Rotation.eulerAngles.y);
+            var horizontal = _pov.m_HorizontalAxis;
+            horizontal.m_MinValue += yaw;
+            horizontal.m_MaxValue += yaw;
+            _pov.m_HorizontalAxis = horizontal;
+        }
         if (_placed && _hands != null && _hands.Rig != null)
             _hands.Rig.SetPositionAndRotation(_position, _rotation);
     }
@@ -103,6 +118,7 @@ internal sealed class StanceControl
     internal void Restore()
     {
         _placed = false;
+        _movingFrame = null;
         if (_pov == null) return;
         // Preserve where the user is now looking, while restoring the previous input settings.
         var v = _pov.m_VerticalAxis.Value;

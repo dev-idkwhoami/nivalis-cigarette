@@ -3,7 +3,7 @@ using NivalisMods.Cigarette;
 var slow = new MaskSlowMotion();
 var slowTime = slow.Apply(0.8f, 0.02f, 1f, 0.35f);
 Near(slowTime.Scale, 0.28f, "Slow relative to previous world speed");
-Near(slowTime.Step, 0.007f, "Physics cadence remains smooth");
+Near(slowTime.Step, 0.02f, "Preserve the native buoyancy timestep during slow motion");
 slowTime = slow.Apply(slowTime.Scale, slowTime.Step, 0f, 0.35f);
 Near(slowTime.Scale, 0.8f, "Restore previous speed after effect");
 Near(slowTime.Step, 0.02f, "Restore physics step after effect");
@@ -27,6 +27,26 @@ slowTime = slow.Apply(0.6f, 0.012f, 1f, 0.35f);
 Near(slowTime.Scale, 0.6f, "External speed takes priority");
 Near(slowTime.Step, 0.012f, "External physics step takes priority");
 Console.WriteLine("PASS: mask slow-motion restore, cancellation, pause and external time ownership.");
+// Changing fixedDeltaTime alters the game's dt-scaled buoyancy/normal-force
+// balance. Preserve even a non-default baseline throughout fade-in/fade-out.
+foreach (var baselineStep in new[] { 0.02f, 1f / 60f, 0.01f })
+foreach (var speed in new[] { 0.1f, 0.35f, 0.5f, 1f })
+{
+    var boatSlow = new MaskSlowMotion();
+    var current = (Scale: 1f, Step: baselineStep);
+    foreach (var strength in new[] { 0.05f, 0.5f, 1f, 1f, 0.5f, 0.05f, 0f })
+    {
+        current = boatSlow.Apply(current.Scale, current.Step, strength, speed);
+        Near(current.Step, baselineStep, "Mask must not change native boat force balance");
+        Near(current.Scale, 1f + (speed - 1f) * strength, "Slow-motion fade still works");
+    }
+}
+var externalStep = new MaskSlowMotion();
+var externalTime = externalStep.Apply(1f, 0.02f, 1f, 0.35f);
+externalTime = externalStep.Apply(externalTime.Scale, 0.03f, 1f, 0.35f);
+Near(externalTime.Scale, 1f, "Release owned world scale after external timestep change");
+Near(externalTime.Step, 0.03f, "Never overwrite another owner's physics timestep");
+Console.WriteLine("PASS: native buoyancy timestep preserved across mask speeds, fades and external changes.");
 var maskEarned = new HighSession();
 maskEarned.BeginSmoke();
 maskEarned.Credit(0f, 60f, 3f);
@@ -326,3 +346,72 @@ for (var step = 0; step <= 1000; step++)
 if (HandMotion.FingerLift(-1f, 0) != 0f || HandMotion.FingerLift(1f, 3) != 0f)
     throw new Exception("Finger tap does not return to rest");
 Console.WriteLine("PASS: fingers land in order; hands lift and retract completely before lowering.");
+
+// Simulated native movement drops tiny steps and can reject temporary blocked frames.
+BoatRailChecks.Run();
+foreach (var reach in new[] { 0.2f, 0.45f, 0.65f })
+foreach (var overshoot in new[] { -0.03f, 0.001f, 0.05f, RailApproachMotion.Allowance })
+foreach (var fps in new[] { 15, 30, 60, 144 })
+{
+    var distance = reach + overshoot;
+    var goal = RailApproachMotion.StandOff(reach);
+    if (goal >= reach || goal < reach * 0.7f) throw new Exception("Proportional buffer outside safe reach range");
+    var travel = Math.Max(0f, distance - goal);
+    var remaining = travel;
+    var elapsed = 0f;
+    var frame = 0;
+    while (elapsed < 2f)
+    {
+        var dt = Math.Min(1f / fps, 0.05f);
+        elapsed += dt;
+        var step = RailApproachMotion.Step(travel, remaining, elapsed, dt);
+        if (step < 0f || step > remaining + 0.000001f) throw new Exception("Approach overshot its destination");
+        // Simulate a controller with a 1 mm movement threshold and transient obstruction.
+        if (step >= 0.001f && ++frame % 5 != 0) remaining -= step;
+    }
+    if (remaining > 0.0011f) throw new Exception($"Approach lost rejected motion at {fps} FPS: {remaining}");
+    Near(RailApproachMotion.StandOff(reach * 2), goal * 2, "Buffer scales with distance rather than fixed centimetres");
+}
+if (RailApproachMotion.MaximumAngle != 35f) throw new Exception("Facing acceptance must be +/-35 degrees");
+Console.WriteLine("PASS: proportional approach buffers and actual-position catch-up across frame rates and rejected native movement.");
+
+// Captured failure: a 2 mm plan was cancelled after a 7 mm native correction.
+if (!RailApproachMotion.PositionReady(0.007f, 0.38f, 0.45f))
+    throw new Exception("Tiny native correction should not prevent an in-reach session");
+if (RailApproachMotion.MovementBudget(0.002f, 0.45f) < 0.007f)
+    throw new Exception("Tiny approach budget rejects ordinary placement correction");
+foreach (var reach in new[] { 0.2f, 0.45f, 0.65f })
+{
+    if (!RailApproachMotion.PositionReady(reach * 0.04f, reach * 0.95f, reach))
+        throw new Exception("Already-close placement should finish alignment without walking");
+    if (RailApproachMotion.PositionReady(reach * 0.04f, reach * 1.001f, reach))
+        throw new Exception("Position tolerance must never bypass actual reach");
+    if (RailApproachMotion.PositionReady(reach * 0.1f, reach * 0.8f, reach))
+        throw new Exception("Significant lateral misalignment must still be corrected");
+}
+Console.WriteLine("PASS: tiny approach/native-correction regression, proportional tolerance and strict reach.");
+
+// Approach and retreat must converge on the same distance without overshooting.
+foreach (var reach in new[] { 0.2f, 0.45f, 0.65f })
+foreach (var fps in new[] { 15, 60, 144 })
+foreach (var startRatio in new[] { 0.1f, 0.5f, 0.88f, 1.3f })
+{
+    var goal = RailApproachMotion.StandOff(reach);
+    var position = reach * startRatio;
+    var travel = Math.Abs(position - goal);
+    var dt = Math.Min(1f / fps, 0.05f);
+    for (var elapsed = dt; elapsed < 2f; elapsed += dt)
+    {
+        var remaining = Math.Abs(position - goal);
+        if (RailApproachMotion.PositionReady(remaining, position, reach)) break;
+        var step = RailApproachMotion.Step(travel, remaining, elapsed, dt);
+        var before = position - goal;
+        position += Math.Sign(goal - position) * step;
+        if (before * (position - goal) < -0.000001f) throw new Exception("Positioning crossed its target");
+    }
+    if (!RailApproachMotion.PositionReady(Math.Abs(position - goal), position, reach))
+        throw new Exception("Forward/backward positioning failed to converge");
+    if (startRatio < 0.5f && position <= reach * startRatio)
+        throw new Exception("Too-close player did not move back");
+}
+Console.WriteLine("PASS: approach and retreat converge on the same proportional stand-off; already positioned players stay put.");

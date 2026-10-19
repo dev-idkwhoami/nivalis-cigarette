@@ -1,5 +1,6 @@
 using HarmonyLib;
 using System.Reflection;
+using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Nivalis;
 using Nivalis.UI;
 using UnityEngine;
@@ -27,7 +28,7 @@ internal sealed class SmokingWheel
         var wheel = RadialMenuUI.instance;
         var character = PlayerManager._instance?.LocalPlayer?.Character;
         if (wheel == null || wheel.IsOpen || character == null ||
-            !RailingTarget.TryTarget(character, out var hit, out _)) return;
+            !RailingTarget.TryCandidate(character, out var hit, out _)) return;
         _character = character; _rail = hit.collider;
         _scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle;
         _wheel = wheel;
@@ -76,7 +77,7 @@ internal sealed class SmokingWheel
         if (!SmokingController.GameplayAvailable()) return null;
         var choice = _choice;
         _choice = null;
-        if (!RailingTarget.TryTarget(_character, out var hit, out _) || hit.collider != _rail) return null;
+        if (!RailingTarget.TryCandidate(_character, out var hit, out _) || hit.collider != _rail) return null;
         return choice;
     }
 
@@ -91,12 +92,25 @@ internal sealed class SmokingWheel
     internal static bool AllowClick(RadialMenuUI wheel) =>
         wheel != _openingWheel || Time.frameCount > _openingFrame;
 
+    internal bool OwnsIcon(Sprite sprite) => sprite != null && _icons.Any(icon => icon != null && icon == sprite);
+
+    private bool IconsValid()
+    {
+        if (_icons.Count != 3 || _textures.Count != 3) return false;
+        try
+        {
+            return Enumerable.Range(0, 3).All(i => _icons[i] != null && _textures[i] != null &&
+                _icons[i].texture == _textures[i]);
+        }
+        catch { return false; } // A stale IL2CPP wrapper may throw from Sprite.texture.
+    }
+
     private void EnsureIcons()
     {
-        if (_icons.Count == 3) return;
-        foreach (var icon in _icons) if (icon != null) Object.Destroy(icon);
-        foreach (var texture in _textures) if (texture != null) Object.Destroy(texture);
-        _icons.Clear(); _textures.Clear();
+        // Managed list entries can outlive their native Unity assets after cleanup.
+        // Check both objects and the binding before reusing a cached icon set.
+        if (IconsValid()) return;
+        DestroyIcons();
         foreach (var kind in new[] { SmokeKind.Cigarette, SmokeKind.Joint, SmokeKind.Mask })
         {
             var name = kind.ToString().ToLowerInvariant() + ".png";
@@ -105,18 +119,31 @@ internal sealed class SmokingWheel
             using var bytes = new MemoryStream();
             stream.CopyTo(bytes);
             var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false)
-                { name = "Cigarette.Wheel." + kind, filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+                {
+                    name = "Cigarette.Wheel." + kind, filterMode = FilterMode.Point,
+                    wrapMode = TextureWrapMode.Clamp,
+                    // This managed cache is not a native scene asset reference.
+                    hideFlags = HideFlags.DontUnloadUnusedAsset
+                };
             _textures.Add(texture);
-            if (!ImageConversion.LoadImage(texture, bytes.ToArray()))
+            if (!ImageConversion.LoadImage(texture, new Il2CppStructArray<byte>(bytes.ToArray()), false))
                 throw new InvalidDataException("Cannot decode smoking icon: " + name);
             var sprite = Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height), new Vector2(0.5f, 0.5f), texture.width);
             _icons.Add(sprite);
+            sprite.name = "Cigarette.Wheel." + kind;
+            sprite.hideFlags = HideFlags.DontUnloadUnusedAsset;
         }
     }
 
     internal void Dispose()
     {
-        Close();
+        try { Close(); }
+        finally { DestroyIcons(); }
+    }
+
+    private void DestroyIcons()
+    {
+        // Protected assets are explicitly destroyed when replaced or disposed.
         foreach (var icon in _icons) if (icon != null) Object.Destroy(icon);
         foreach (var texture in _textures) if (texture != null) Object.Destroy(texture);
         _icons.Clear(); _textures.Clear();
@@ -129,4 +156,26 @@ internal static class SmokingWheelOpeningClick
 {
     [HarmonyPrefix]
     private static bool Prefix(RadialMenuUI __instance) => SmokingWheel.AllowClick(__instance);
+}
+
+// Native wheel items can retain an override/material from a previous action.
+// Match Photo Companion's workaround, scoped strictly to our three icons.
+[HarmonyPatch(typeof(RadialMenuItemUI), nameof(RadialMenuItemUI.Init))]
+internal static class SmokingWheelIconDisplay
+{
+    [HarmonyPostfix]
+    private static void Postfix(RadialMenuItemUI __instance, Sprite __1)
+    {
+        if (SmokingController.Instance?.OwnsWheelIcon(__1) != true || __instance.icon == null) return;
+        try
+        {
+            var image = __instance.icon;
+            image.overrideSprite = null;
+            image.material = null;
+            image.type = UnityEngine.UI.Image.Type.Simple;
+            image.preserveAspect = true;
+            image.SetAllDirty();
+        }
+        catch (Exception e) { Plugin.Logger.LogWarning("Restoring smoking icon display: " + e.Message); }
+    }
 }

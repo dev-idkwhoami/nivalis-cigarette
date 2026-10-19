@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <AssemblyName>Nivalis.Cigarette</AssemblyName>
-    <Version>1.1.1</Version>
+    <Version>1.2.0</Version>
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="../assets/icons/*.png" LogicalName="Cigarette.Icons.%(Filename)%(Extension)" />

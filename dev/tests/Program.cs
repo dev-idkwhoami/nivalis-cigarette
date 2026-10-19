@@ -28,3 +28,4 @@ try
 }
 finally { Directory.Delete(directory, true); }
 Console.WriteLine("PASS: rail trials match only the selected scene/object/position; JSON persistence, removal, backup and invalid input.");
+BoatRailChecks.Run();

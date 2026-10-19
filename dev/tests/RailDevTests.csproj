@@ -6,5 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../rail-tools/RailRules.cs" Link="RailRules.cs" />
+    <Compile Include="../../tests/BoatRailChecks.cs" Link="BoatRailChecks.cs" />
+    <Compile Include="../../src/BoatRailLayout.cs" Link="BoatRailLayout.cs" />
   </ItemGroup>
 </Project>

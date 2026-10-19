@@ -16,6 +16,7 @@ public sealed class SmokingController : MonoBehaviour
     internal static SmokingController? Instance;
     private PlayerHandsAnimator? _hands;
     private bool _active, _exiting;
+    private RailApproach? _approach;
     private readonly List<DroppedCigarette> _drops = new();
     private StanceControl? _stance;
     private CustomDraw? _customDraw;
@@ -50,6 +51,9 @@ public sealed class SmokingController : MonoBehaviour
     public SmokingController(IntPtr pointer) : base(pointer) { }
     public void Awake() => Instance = this;
 
+    [HideFromIl2Cpp]
+    internal bool OwnsWheelIcon(Sprite sprite) => _wheel.OwnsIcon(sprite);
+
     public void Update()
     {
         try
@@ -60,10 +64,34 @@ public sealed class SmokingController : MonoBehaviour
             for (var i = _drops.Count - 1; i >= 0; i--)
                 if (!_drops[i].Tick()) { _drops[i].Dispose(); _drops.RemoveAt(i); }
             var keyboard = Keyboard.current;
+            if (_approach != null)
+            {
+                var approach = _approach;
+                var result = approach.Tick();
+                if (result != 0)
+                {
+                    _approach = null;
+                    approach.Dispose();
+                    if (result > 0) StartSmoking(approach.Kind, approach.Top);
+                }
+                return;
+            }
             var choice = _wheel.Tick();
             if (choice.HasValue)
             {
-                if (CanSmokeAtRail()) StartSmoking(choice.Value);
+                if (CanSmokeAtRail())
+                {
+                    var character = PlayerManager._instance.LocalPlayer.Character;
+                    if (RailingTarget.TryCandidate(character, out var top, out _))
+                    {
+                        if (RailingTarget.TryFacing(character, top, out var facing))
+                        {
+                            var approach = new RailApproach(character, top, facing, choice.Value);
+                            _approach = approach;
+                            approach.Begin(this);
+                        }
+                    }
+                }
                 return;
             }
             if (_wheel.Busy) return;
@@ -107,7 +135,7 @@ public sealed class SmokingController : MonoBehaviour
     }
 
     [HideFromIl2Cpp]
-    private void StartSmoking(SmokeKind kind)
+    private void StartSmoking(SmokeKind kind, RaycastHit target)
     {
         Stop(null);
         var character = PlayerManager._instance.LocalPlayer.Character;
@@ -120,7 +148,12 @@ public sealed class SmokingController : MonoBehaviour
             Notice("Stand on foot with empty hands before smoking.");
             return;
         }
-        if (!RailingTarget.TryTarget(character, out var railTop, out _)) return;
+        if (!RailingTarget.TryTop(character, target.collider, target.point,
+            RailingTarget.MaximumDistance, out var railTop, out var targetReason))
+        {
+            Notice("Smoking setup cancelled: " + targetReason);
+            return;
+        }
         if (kind == SmokeKind.Mask && !MaskModel.Available())
         {
             Notice("City inhalant-mask assets are not loaded here. Try a populated street.");
@@ -189,10 +222,13 @@ public sealed class SmokingController : MonoBehaviour
         _scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle;
         Evaluate(hands);
         _stance.AlignCustomBody(animator, character.transform.position, character.Controller.Rotation);
+        var movingAnchor = RailSurface.Boat.AnchorFor(railTop.collider);
+        if (movingAnchor != null) _stance.Follow(movingAnchor);
         CreateCigarette(animator);
         if (_cigarette != null)
         {
             _customDraw = new CustomDraw(hands, character.Controller.Camera.transform, _cigarette.transform, character.Controller.Rotation, character, _session, railTop, _kind);
+            if (movingAnchor != null) _customDraw.Follow(movingAnchor);
         }
         RailPrompt.Release();
         _hud = new SmokingHud();
@@ -307,6 +343,8 @@ public sealed class SmokingController : MonoBehaviour
         if (!_active || _exiting) return;
         CreditAfterEffects();
         if (_customDraw == null) { Stop(null); return; }
+        // Snapshot the hands after applying this frame's boat motion.
+        if (_stance?.FollowsMovingRail == true && _hands != null) Evaluate(_hands);
         _exiting = true;
         _customDraw.BeginExit();
         // Menus/focus loss must never wait on the lowering animation to restore their UI.
@@ -328,6 +366,10 @@ public sealed class SmokingController : MonoBehaviour
     [HideFromIl2Cpp]
     internal void Stop(string? message)
     {
+        var approach = _approach;
+        _approach = null;
+        try { approach?.Dispose(); }
+        catch (Exception e) { Plugin.Logger.LogWarning("Releasing railing approach: " + e.Message); }
         try { _wheel.Close(); }
         catch (Exception e) { Plugin.Logger.LogWarning("Closing smoking menu: " + e.Message); }
         CreditAfterEffects();
@@ -418,7 +460,7 @@ public sealed class SmokingController : MonoBehaviour
     [HideFromIl2Cpp]
     internal bool CanSmokeAtRail()
     {
-        if (_active || !GameplayAvailable()) return false;
+        if (_active || _approach != null || !GameplayAvailable()) return false;
         var character = PlayerManager._instance.LocalPlayer.Character;
         var hands = character.Controller.HandsAnimator;
         if (hands == null || !character.Controller.CanMove || !character.CanEquipItem ||
@@ -427,7 +469,7 @@ public sealed class SmokingController : MonoBehaviour
             hands.IsSitting || hands.IsPlayingMealAnimation || hands.sleeping || hands.placingItem || hands.IsHoldingTray ||
             hands.Animator.GetBool(PlayerHandsAnimator.Param.Fishing)) return false;
         if (hands.Animator.IsInTransition(0) || hands.Animator.GetCurrentAnimatorStateInfo(0).fullPathHash != Animator.StringToHash(IdleState)) return false;
-        return RailingTarget.TryTarget(character, out _, out _);
+        return RailingTarget.TryCandidate(character, out _, out _);
     }
 
     [HideFromIl2Cpp]
@@ -440,7 +482,7 @@ public sealed class SmokingController : MonoBehaviour
     }
 
     public void OnDisable() { RailPrompt.Release(); Stop(null); _high.Dispose(); _maskEffect.Clear(); foreach (var drop in _drops) drop.Dispose(); _drops.Clear(); }
-    public void OnDestroy() { Stop(null); _wheel.Dispose(); _high.Dispose(); _maskEffect.Clear(); foreach (var drop in _drops) drop.Dispose(); _drops.Clear(); if (Instance == this) Instance = null; }
+    public void OnDestroy() { Stop(null); RailSurface.Boat.Dispose(); _wheel.Dispose(); _high.Dispose(); _maskEffect.Clear(); foreach (var drop in _drops) drop.Dispose(); _drops.Clear(); if (Instance == this) Instance = null; }
 }
 
 [HarmonyPatch(typeof(PlayerHandsAnimator), nameof(PlayerHandsAnimator.ManualUpdate))]

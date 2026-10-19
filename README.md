@@ -11,7 +11,12 @@ At an eligible railing, left-click to open the native four-section radial menu:
 from `assets/icons/`, with native icon tinting disabled. Close retains the native X.
 This replaces the hidden Shift-click selection. The native
 wheel handles mouse/controller selection and cancellation; choosing an item starts
-only after it closes and the player/railing are revalidated.
+only after it closes and the player/railing are revalidated. Nearby targets up to 30 cm
+beyond normal reach get a short, smooth approach after selection. The tooltip requires
+facing within 35 degrees either side of perpendicular to the rail. Selection smoothly
+aligns the view and body to the rail and leaves a distance-proportional reach buffer;
+movement/Escape or a blocked path cancels. The player's three
+rear-deck boat rails are supported directly, without the development DLL.
 The joint follows the supplied photo: a slender, gently tapered body, pale rolled
 tip with a dark opening, subtle mottled rolling paper and a crimped, twisted end.
 The cone’s wide end is another 10% wider, with the same narrow mouthpiece and short shoulder before the thin twist.
@@ -199,6 +204,8 @@ The effect and its real-time countdown wait during smoking/lowering and menus.
 There are 0.4-second fades at the start and end. New mask sessions add to remaining
 time, capped at 30 minutes. Scene/player changes and mod cleanup clear the effect.
 Scaled world animation and physics slow down; unscaled systems and audio do not.
+The native physics timestep stays unchanged to preserve the boat's buoyancy force
+balance; slow motion reduces physics updates per real second instead.
 External time changes, including pause, take priority. Mask inhale volume is 0.125.
 
 The native player update skips movement below time scale 1. During mask-owned

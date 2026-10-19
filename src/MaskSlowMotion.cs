@@ -32,7 +32,11 @@ internal sealed class MaskSlowMotion
         speed = float.IsFinite(speed) ? Math.Clamp(speed, 0.1f, 1f) : 0.5f;
         var multiplier = 1f + (speed - 1f) * Math.Clamp(strength, 0f, 1f);
         _lastScale = _baseScale * multiplier;
-        _lastStep = _baseStep * multiplier;
+        // Keep the game's calibrated simulation step. Native BuoyantBody's job
+        // already multiplies buoyancy by fixedDeltaTime before AddForceAtPosition
+        // with ForceMode.Force. Reducing the step weakens lift relative to gravity.
+        // timeScale alone slows simulation; physics runs less often in real time.
+        _lastStep = _baseStep;
         return (_lastScale, _lastStep);
     }
 

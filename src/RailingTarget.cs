@@ -5,12 +5,21 @@ namespace NivalisMods.Cigarette;
 
 internal static class RailingTarget
 {
-    internal static bool TryTarget(PlayerCharacter character, out RaycastHit hit, out string reason)
+    internal static float MaximumDistance => float.IsFinite(Plugin.RailDistance.Value)
+        ? Mathf.Clamp(Plugin.RailDistance.Value, 0.2f, 0.65f) : 0.45f;
+
+    internal static bool TryTarget(PlayerCharacter character, out RaycastHit hit, out string reason) =>
+        TryAim(character, MaximumDistance, out hit, out reason);
+
+    internal static bool TryCandidate(PlayerCharacter character, out RaycastHit hit, out string reason) =>
+        TryAim(character, MaximumDistance + RailApproachMotion.Allowance, out hit, out reason);
+
+    private static bool TryAim(PlayerCharacter character, float maximum, out RaycastHit hit, out string reason)
     {
         var hands = character.Controller.HandsAnimator;
         reason = "No collider within the 1.5 m camera ray / environment layer mask";
         var eye = character.Controller.Camera.transform;
-        if (!Physics.Raycast(eye.position, eye.forward, out hit, 1.5f, hands.environmentLayer, QueryTriggerInteraction.Ignore)) return false;
+        if (!RailSurface.Raycast(eye.position, eye.forward, out hit, 1.5f, hands.environmentLayer, QueryTriggerInteraction.Ignore)) return false;
         if (IsReviewedPlayerBlocker(hit.collider))
         {
             // Only the three captured Hive Mall collision volumes may be looked through.
@@ -30,22 +39,57 @@ internal static class RailingTarget
         if (hit.collider == null || hit.collider.transform.IsChildOf(character.transform)) return false;
         reason = "No recognized railing/fence name or reviewed scene/mesh match";
         if (!IsRecognizedRail(hit.collider)) return false;
-        var maximum = Plugin.RailDistance.Value;
-        maximum = float.IsFinite(maximum) ? Mathf.Clamp(maximum, 0.2f, 0.65f) : 0.45f;
-        var horizontalDistance = Vector3.ProjectOnPlane(hit.point - character.transform.position, Vector3.up).magnitude;
-        reason = "Beyond maximum horizontal activation distance";
-        if (horizontalDistance > maximum) return false;
+        if (!TryTop(character, hit.collider, hit.point, maximum, out hit, out reason)) return false;
+        reason = "Cannot establish the railing facing direction";
+        if (!TryFacing(character, hit, out var facing)) return false;
+        reason = "Face within 35 degrees of perpendicular to the railing";
+        var look = Vector3.ProjectOnPlane(eye.forward, Vector3.up);
+        if (look.sqrMagnitude < 0.001f || Vector3.Angle(look, facing) > RailApproachMotion.MaximumAngle) return false;
+        reason = "Eligible railing target";
+        return true;
+    }
+
+    internal static bool TryTop(PlayerCharacter character, Collider collider, Vector3 point, float maximum,
+        out RaycastHit hit, out string reason)
+    {
+        hit = default;
+        reason = "Railing no longer available";
+        if (collider == null || !collider.enabled || !collider.gameObject.activeInHierarchy) return false;
+        var hands = character.Controller.HandsAnimator;
         // Require a nearby reachable-height top at the aimed railing, not a distant object behind it.
         reason = "Downward probe did not find a top surface";
         var baseY = character.transform.position.y;
-        if (!Physics.Raycast(new Vector3(hit.point.x, baseY + 1.65f, hit.point.z), Vector3.down,
+        if (!RailSurface.Raycast(new Vector3(point.x, baseY + 1.65f, point.z), Vector3.down,
             out var top, 1.0f, hands.environmentLayer, QueryTriggerInteraction.Ignore)) return false;
-        if (top.collider != hit.collider) { reason = "Top surface belongs to a different collider"; return false; }
+        if (top.collider != collider) { reason = "Top surface belongs to a different collider"; return false; }
         if (top.normal.y <= 0.85f) { reason = "Top surface is too steep"; return false; }
         if (top.point.y - baseY > 1.4f) { reason = "Top is above the 1.4 m height limit"; return false; }
+        reason = "Beyond maximum horizontal activation distance";
+        if (Vector3.ProjectOnPlane(top.point - character.transform.position, Vector3.up).magnitude > maximum) return false;
         hit = top; // Pass the verified surface to hand placement, not the originally aimed front face.
         reason = "Eligible railing target";
         return true;
+    }
+
+    // The top normal points up; it cannot establish the rail's horizontal heading.
+    // Probe its near side just below the verified top, never infer from a combined
+    // building mesh's bounds or the player's current viewing direction.
+    internal static bool TryFacing(PlayerCharacter character, RaycastHit top, out Vector3 facing)
+    {
+        facing = default;
+        var toward = Vector3.ProjectOnPlane(top.point - character.transform.position, Vector3.up);
+        if (toward.sqrMagnitude < 0.001f) return false;
+        foreach (var inset in new[] { 0.008f, 0.02f, 0.05f })
+        {
+            var origin = character.transform.position;
+            origin.y = top.point.y - inset;
+            if (!top.collider.Raycast(new Ray(origin, toward.normalized), out var side, toward.magnitude + 0.1f)) continue;
+            var normal = Vector3.ProjectOnPlane(side.normal, Vector3.up);
+            if (normal.sqrMagnitude < 0.5f || Mathf.Abs(side.normal.y) > 0.5f) continue;
+            facing = -normal.normalized;
+            return true;
+        }
+        return false;
     }
 
     private static bool IsRecognizedRail(Collider collider)

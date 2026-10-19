@@ -9,26 +9,26 @@ internal sealed class CustomDraw
 {
     private readonly ArmDriver _arm, _supportArm;
     private readonly SupportHandPose _supportPose;
-    private readonly Vector3 _bodyOrigin;
+    private Vector3 _bodyOrigin;
     private float _railNearDepth;
     private Vector3 _exitRetract, _exitSupportRetract;
     private readonly Transform? _shoulder, _supportShoulder;
-    private readonly Vector3 _supportShoulderPosition;
-    private readonly Quaternion _supportShoulderRotation;
-    private readonly Vector3 _restShoulderOffset, _restSupportShoulderOffset;
+    private Vector3 _supportShoulderPosition;
+    private Quaternion _supportShoulderRotation;
+    private Vector3 _restShoulderOffset, _restSupportShoulderOffset;
     private Vector3 _exitShoulderPosition, _exitSupportShoulderPosition;
-    private readonly Vector3 _shoulderPosition;
-    private readonly Quaternion _shoulderRotation;
-    private readonly Vector3 _eyeAtStart;
+    private Vector3 _shoulderPosition;
+    private Quaternion _shoulderRotation;
+    private Vector3 _eyeAtStart;
     private readonly float _side;
-    private readonly Vector3 _supportPosition;
-    private readonly Quaternion _supportRotation;
+    private Vector3 _supportPosition;
+    private Quaternion _supportRotation;
     private readonly Transform _hand, _forearm, _eye, _cigarette;
     private readonly Quaternion _handFrame;
     private readonly Quaternion _neutralWrist;
-    private readonly Quaternion _bodyRotation;
-    private readonly Vector3 _restPosition;
-    private readonly Quaternion _restRotation;
+    private Quaternion _bodyRotation;
+    private Vector3 _restPosition;
+    private Quaternion _restRotation;
     private readonly List<(Transform Bone, Quaternion Relaxed, Quaternion Draw)> _grip = new();
     private readonly float _start;
     private float Clock => _mask ? Time.unscaledTime : Time.time;
@@ -106,21 +106,23 @@ internal sealed class CustomDraw
         var supportFrame = HandFrame(hands.Animator, !left);
         _supportRotation = desiredRest * Quaternion.Inverse(supportFrame);
         _supportPosition = eye.position + bodyRotation * new Vector3(-_side * 0.24f, -0.46f, 0.28f);
-        // Anchor both hands to the selected rail. A miss on one side must not discard the other contact.
+        // Require both contacts; never fall back to a floating hand when a narrow rail ends.
         if (_mask)
             _restRotation = Quaternion.LookRotation(bodyRotation * Vector3.forward,
                 (-_side * (bodyRotation * Vector3.right) + Vector3.up * 0.35f).normalized) * Quaternion.Inverse(handFrame);
         var wristOffset = Vector3.up * (_mask ? 0.115f : 0.045f);
         _supportPose = new SupportHandPose(hands.Animator, _supportRotation);
         var palmOffset = _supportPose.ContactOffset;
-        if (TryRailTop(character, hands, bodyRotation, _side * 0.22f, railTop, _arm, _shoulder != null, true, wristOffset, out var restContact, out var rightNearEdge, out _))
+        if (!TryRailTop(character, hands, bodyRotation, _side * 0.22f, railTop, _arm, _shoulder != null, true, wristOffset, out var restContact, out var rightNearEdge, out _))
+            throw new InvalidOperationException("The selected rail does not provide a reachable smoking-hand contact.");
         {
             _railNearDepth = Mathf.Min(_railNearDepth, rightNearEdge);
             _restPosition = restContact + wristOffset;
             if (_shoulder != null) _restShoulderOffset = _arm.ShoulderOffsetFor(_restPosition);
             _restRotation = Quaternion.AngleAxis(12f, bodyRotation * Vector3.right) * _restRotation;
         }
-        if (TryRailTop(character, hands, bodyRotation, -_side * 0.22f, railTop, _supportArm, _supportShoulder != null, false, palmOffset, out var supportContact, out var leftNearEdge, out var leftFarEdge))
+        if (!TryRailTop(character, hands, bodyRotation, -_side * 0.22f, railTop, _supportArm, _supportShoulder != null, false, palmOffset, out var supportContact, out var leftNearEdge, out var leftFarEdge))
+            throw new InvalidOperationException("The selected rail does not provide a reachable support-hand contact.");
         {
             _supportPose.FitSurface(_supportRotation, bodyRotation * Vector3.forward,
                 Vector3.Dot(supportContact - _bodyOrigin, bodyRotation * Vector3.forward), leftNearEdge, leftFarEdge);
@@ -265,8 +267,41 @@ internal sealed class CustomDraw
             entry.Bone.localRotation = Quaternion.Slerp(entry.Relaxed, entry.Draw, drawBlend);
     }
 
+    private MovingRailFrame? _movingFrame;
+    internal void Follow(Transform anchor) => _movingFrame = new MovingRailFrame(anchor);
+
+    private void FollowRail()
+    {
+        if (_movingFrame == null) return;
+        var delta = _movingFrame.Advance();
+        Vector3 Point(Vector3 p) => delta.After + delta.Rotation * (p - delta.Before);
+        _bodyOrigin = Point(_bodyOrigin);
+        _eyeAtStart = Point(_eyeAtStart);
+        _shoulderPosition = Point(_shoulderPosition);
+        _supportShoulderPosition = Point(_supportShoulderPosition);
+        _restPosition = Point(_restPosition);
+        _supportPosition = Point(_supportPosition);
+        _restShoulderOffset = delta.Rotation * _restShoulderOffset;
+        _restSupportShoulderOffset = delta.Rotation * _restSupportShoulderOffset;
+        _bodyRotation = delta.Rotation * _bodyRotation;
+        _shoulderRotation = delta.Rotation * _shoulderRotation;
+        _supportShoulderRotation = delta.Rotation * _supportShoulderRotation;
+        _restRotation = delta.Rotation * _restRotation;
+        _supportRotation = delta.Rotation * _supportRotation;
+        if (!_exiting) return;
+        _exitHand = Point(_exitHand);
+        _exitSupport = Point(_exitSupport);
+        _exitRetract = Point(_exitRetract);
+        _exitSupportRetract = Point(_exitSupportRetract);
+        _exitShoulderPosition = Point(_exitShoulderPosition);
+        _exitSupportShoulderPosition = Point(_exitSupportShoulderPosition);
+        _exitHandRotation = delta.Rotation * _exitHandRotation;
+        _exitSupportRotation = delta.Rotation * _exitSupportRotation;
+    }
+
     internal void BeginExit()
     {
+        FollowRail();
         if (_exiting) return;
         _exitBurn = BurnProgress;
         _exitHand = _hand.position;
@@ -323,6 +358,7 @@ internal sealed class CustomDraw
 
     internal void Evaluate()
     {
+        FollowRail();
         if (_exiting) { EvaluateExit(); return; }
         var elapsed = Clock - _start;
         var nextIndex = _drawIndex;
@@ -473,7 +509,7 @@ internal sealed class CustomDraw
             point = default;
             var origin = character.transform.position + body * new Vector3(side, 0f, depth);
             origin.y = railTop.point.y + 0.08f;
-            if (!Physics.Raycast(origin, Vector3.down, out var hit, 0.16f, hands.environmentLayer, QueryTriggerInteraction.Ignore)) return false;
+            if (!RailSurface.Raycast(origin, Vector3.down, out var hit, 0.16f, hands.environmentLayer, QueryTriggerInteraction.Ignore)) return false;
             if (hit.collider != railTop.collider || hit.normal.y < 0.85f) return false;
             var height = hit.point.y - character.transform.position.y;
             if (height < 0.65f || height > 1.4f) return false;
