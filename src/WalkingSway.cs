@@ -9,7 +9,10 @@ internal sealed class WalkingSway
     internal void Update(Vector3 freeArmSwing, float speed, float deltaTime)
     {
         if (!float.IsFinite(speed) || !float.IsFinite(deltaTime) || deltaTime <= 0f) return;
-        var target = -freeArmSwing * 0.20f;
+        // Remap the native forward/back gait into a vertical smoking-hand bob.
+        // Keep only a trace of lateral/depth movement rather than pushing into the chest.
+        var target = new Vector3(-freeArmSwing.X * 0.04f,
+            -freeArmSwing.Z * 0.20f + freeArmSwing.Y * 0.04f, -freeArmSwing.Z * 0.015f);
         var length = target.Length();
         if (!float.IsFinite(length)) return;
         if (length > 0.025f) target *= 0.025f / length;

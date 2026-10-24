@@ -758,11 +758,27 @@ public sealed class SmokingController : MonoBehaviour
 [HarmonyPatch(typeof(PlayerHandsAnimator), nameof(PlayerHandsAnimator.ManualUpdate))]
 internal static class HandsUpdatePatch
 {
-    [HarmonyPrefix]
-    private static bool Prefix(PlayerHandsAnimator __instance)
+    internal struct PlaybackSnapshot
     {
+        internal Animator? Animator;
+        internal float Speed;
+    }
+
+    [HarmonyPrefix]
+    private static bool Prefix(PlayerHandsAnimator __instance, out PlaybackSnapshot __state)
+    {
+        __state = default;
         var smoking = SmokingController.Instance;
-        if (smoking == null || !smoking.Owns(__instance) || smoking.UsesNativeHands(__instance)) return true;
+        if (smoking == null || !smoking.Owns(__instance)) return true;
+        if (smoking.UsesNativeHands(__instance))
+        {
+            var animator = __instance.Animator;
+            __state = new PlaybackSnapshot { Animator = animator, Speed = animator.speed };
+            // Only the native hands evaluation runs at half tempo. Character
+            // velocity, input, physics, smoking timing and world time are untouched.
+            animator.speed = __state.Speed * 0.5f;
+            return true;
+        }
         try { smoking.Evaluate(__instance); return false; }
         catch (Exception e)
         {
@@ -774,6 +790,14 @@ internal static class HandsUpdatePatch
     [HarmonyPostfix]
     private static void Postfix(PlayerHandsAnimator __instance) => SmokingController.Instance?.AfterNativeHands(__instance);
 
+    [HarmonyFinalizer]
+    private static void Finalizer(PlaybackSnapshot __state)
+    {
+        // Restore even if evaluation throws or an interaction ends the session.
+        // Preserve a speed change made by another owner during this update.
+        if (__state.Animator != null && __state.Animator.speed == __state.Speed * 0.5f)
+            __state.Animator.speed = __state.Speed;
+    }
 }
 
 [HarmonyPatch(typeof(PlayerHandsAnimator), nameof(PlayerHandsAnimator.UpdateIK), new Type[] { })]

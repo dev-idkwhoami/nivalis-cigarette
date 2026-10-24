@@ -17,7 +17,7 @@ internal static class CompanionSettings
         var smoking = mod.AddCategory("Smoking", "Smoking");
         smoking.BindToggle("AllowSprintingWhileSmoking", "Allow sprinting while smoking", Plugin.AllowSprinting,
             "Allow sprinting during free smoking. Off by default; walking remains available.");
-        var hotkey = mod.Controls.AddInput("StandingSmoke", "Start / stop smoking", "<Keyboard>/f8");
+        var hotkey = mod.Controls.AddInput("StandingSmoke", "Start / stop smoking", "<Keyboard>/x");
         Plugin.StandingSmokePressed = () => CompanionInput.WasPressed(hotkey);
         mod.Controls.AddParagraph("SmokingControls", "With empty hands, left-click a railing to smoke there, or use Start / stop smoking anywhere on foot. Walking and stopping keep the same session. Press the hotkey again or interact to end free smoking. Movement or Escape still ends railing smoking.");
     }
