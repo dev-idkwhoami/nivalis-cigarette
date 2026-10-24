@@ -24,14 +24,19 @@ internal sealed class SmokingWheel
     private float _deadline;
     private PlayerCharacter? _character;
     private Collider? _rail;
+    private bool _standing;
     internal bool Busy => _wheel != null || _choice.HasValue || Time.frameCount == _closedFrame;
 
-    internal void Open()
+    internal bool Standing => _standing;
+
+    internal void Open(bool standing = false)
     {
         var wheel = RadialMenuUI.instance;
         var character = PlayerManager._instance?.LocalPlayer?.Character;
+        var hit = default(RaycastHit);
+        _standing = standing;
         if (wheel == null || wheel.IsOpen || character == null ||
-            !RailingTarget.TryCandidate(character, out var hit, out _)) return;
+            (!_standing && !RailingTarget.TryCandidate(character, out hit, out _))) return;
         _character = character; _rail = hit.collider;
         _scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle;
         _wheel = wheel;
@@ -76,7 +81,7 @@ internal sealed class SmokingWheel
     internal SmokeKind? Tick()
     {
         if (_wheel == null && !_choice.HasValue) return null;
-        if (!Application.isFocused || _character == null || _rail == null ||
+        if (!Application.isFocused || _character == null || (!_standing && _rail == null) ||
             PlayerManager._instance?.LocalPlayer?.Character != _character ||
             UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle != _scene)
         { Close(); return null; }
@@ -89,11 +94,11 @@ internal sealed class SmokingWheel
         if (!_choice.HasValue || Time.frameCount <= _choiceFrame || Time.frameCount <= _closedFrame) return null;
         if (Time.unscaledTime > _deadline) { Close(); return null; }
         // Wait for the native window to release its gameplay locks. The controller
-        // revalidates hands, movement and the railing before starting the session.
+        // revalidates hands, movement and the selected style before starting.
         if (!SmokingController.GameplayAvailable()) return null;
         var choice = _choice;
         _choice = null;
-        if (!RailingTarget.TryCandidate(_character, out var hit, out _) || hit.collider != _rail) return null;
+        if (!_standing && (!RailingTarget.TryCandidate(_character, out var hit, out _) || hit.collider != _rail)) return null;
         return choice;
     }
 

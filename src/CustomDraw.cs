@@ -8,7 +8,7 @@ namespace NivalisMods.Cigarette;
 internal sealed class CustomDraw
 {
     private readonly ArmDriver _arm, _supportArm;
-    private readonly SupportHandPose _supportPose;
+    private readonly SupportHandPose? _supportPose;
     private Vector3 _bodyOrigin;
     private float _railNearDepth;
     private Vector3 _exitRetract, _exitSupportRetract;
@@ -34,6 +34,8 @@ internal sealed class CustomDraw
     private float Clock => _mask ? Time.unscaledTime : Time.time;
     private readonly SmokingSession _session;
     private readonly bool _mask;
+    private readonly bool _standing;
+    private Vector3 _upperArmPosition;
     private int _drawIndex;
     private bool _exiting;
     private float _exitStarted, _exitBurn;
@@ -52,8 +54,9 @@ internal sealed class CustomDraw
 #endif
     private float _exhaleDuration = UnityEngine.Random.Range(1f, 2.5f);
 
-    internal CustomDraw(PlayerHandsAnimator hands, Transform eye, Transform cigarette, Quaternion bodyRotation, PlayerCharacter character, SmokingSession session, RaycastHit railTop, SmokeKind kind)
+    internal CustomDraw(PlayerHandsAnimator hands, Transform eye, Transform cigarette, Quaternion bodyRotation, PlayerCharacter character, SmokingSession session, RaycastHit railTop, SmokeKind kind, bool standing = false)
     {
+        _standing = standing;
         _session = session;
         _mask = kind == SmokeKind.Mask;
         _bodyOrigin = character.transform.position;
@@ -64,7 +67,7 @@ internal sealed class CustomDraw
         _shoulder = hands.Animator.GetBoneTransform(left ? HumanBodyBones.LeftShoulder : HumanBodyBones.RightShoulder);
         if (_shoulder != null)
         {
-            _shoulderPosition = _shoulder.position - bodyRotation * Vector3.forward * 0.08f;
+            _shoulderPosition = _shoulder.position - bodyRotation * Vector3.forward * (standing ? 0f : 0.08f);
             _shoulderRotation = _shoulder.rotation;
             _shoulder.SetPositionAndRotation(_shoulderPosition, _shoulderRotation);
         }
@@ -111,24 +114,41 @@ internal sealed class CustomDraw
             _restRotation = Quaternion.LookRotation(bodyRotation * Vector3.forward,
                 (-_side * (bodyRotation * Vector3.right) + Vector3.up * 0.35f).normalized) * Quaternion.Inverse(handFrame);
         var wristOffset = Vector3.up * (_mask ? 0.115f : 0.045f);
-        _supportPose = new SupportHandPose(hands.Animator, _supportRotation);
-        var palmOffset = _supportPose.ContactOffset;
-        if (!TryRailTop(character, hands, bodyRotation, _side * 0.22f, railTop, _arm, _shoulder != null, true, wristOffset, out var restContact, out var rightNearEdge, out _))
-            throw new InvalidOperationException("The selected rail does not provide a reachable smoking-hand contact.");
+        _supportPose = _standing ? null : new SupportHandPose(hands.Animator, _supportRotation);
+        if (_standing)
         {
-            _railNearDepth = Mathf.Min(_railNearDepth, rightNearEdge);
-            _restPosition = restContact + wristOffset;
-            if (_shoulder != null) _restShoulderOffset = _arm.ShoulderOffsetFor(_restPosition);
-            _restRotation = Quaternion.AngleAxis(12f, bodyRotation * Vector3.right) * _restRotation;
+            var upper = hands.Animator.GetBoneTransform(HumanBodyBones.RightUpperArm);
+            _upperArmPosition = upper.position;
+            // Keep the native shoulder anchors and solve a short, bent-arm draw.
+            // No lowered-arm transport, shoulder widening or axial-roll overrides.
+            _restPosition = eye.position + bodyRotation * new Vector3(0.20f, -0.32f, 0.25f);
+            var palm = -(bodyRotation * Vector3.forward);
+            if (_mask) palm = (palm + Vector3.up * 0.65f).normalized;
+            _restRotation = Quaternion.LookRotation(bodyRotation * new Vector3(-1f, 0.15f, 0.05f), palm) * Quaternion.Inverse(handFrame);
+            // The free arm stays in its sampled native idle pose.
+            _supportPosition = _supportHand.position;
+            _supportRotation = _supportHand.rotation;
         }
-        if (!TryRailTop(character, hands, bodyRotation, -_side * 0.22f, railTop, _supportArm, _supportShoulder != null, false, palmOffset, out var supportContact, out var leftNearEdge, out var leftFarEdge))
-            throw new InvalidOperationException("The selected rail does not provide a reachable support-hand contact.");
+        else
         {
-            _supportPose.FitSurface(_supportRotation, bodyRotation * Vector3.forward,
-                Vector3.Dot(supportContact - _bodyOrigin, bodyRotation * Vector3.forward), leftNearEdge, leftFarEdge);
-            _railNearDepth = Mathf.Min(_railNearDepth, leftNearEdge);
-            _supportPosition = supportContact + _supportPose.ContactOffset;
-            if (_supportShoulder != null) _restSupportShoulderOffset = _supportArm.ShoulderOffsetFor(_supportPosition);
+            var palmOffset = _supportPose!.ContactOffset;
+            if (!TryRailTop(character, hands, bodyRotation, _side * 0.22f, railTop, _arm, _shoulder != null, true, wristOffset, out var restContact, out var rightNearEdge, out _))
+                throw new InvalidOperationException("The selected rail does not provide a reachable smoking-hand contact.");
+            {
+                _railNearDepth = Mathf.Min(_railNearDepth, rightNearEdge);
+                _restPosition = restContact + wristOffset;
+                if (_shoulder != null) _restShoulderOffset = _arm.ShoulderOffsetFor(_restPosition);
+                _restRotation = Quaternion.AngleAxis(12f, bodyRotation * Vector3.right) * _restRotation;
+            }
+            if (!TryRailTop(character, hands, bodyRotation, -_side * 0.22f, railTop, _supportArm, _supportShoulder != null, false, palmOffset, out var supportContact, out var leftNearEdge, out var leftFarEdge))
+                throw new InvalidOperationException("The selected rail does not provide a reachable support-hand contact.");
+            {
+                _supportPose!.FitSurface(_supportRotation, bodyRotation * Vector3.forward,
+                    Vector3.Dot(supportContact - _bodyOrigin, bodyRotation * Vector3.forward), leftNearEdge, leftFarEdge);
+                _railNearDepth = Mathf.Min(_railNearDepth, leftNearEdge);
+                _supportPosition = supportContact + _supportPose!.ContactOffset;
+                if (_supportShoulder != null) _restSupportShoulderOffset = _supportArm.ShoulderOffsetFor(_supportPosition);
+            }
         }
         // Choose the cigarette roll so fingers run sideways at the mouth, instead of bending the wrist backwards.
         var frameWorld = _hand.rotation * handFrame;
@@ -167,8 +187,8 @@ internal sealed class CustomDraw
             var curlDirection = finger == "Thumb"
                 ? (Bone("Ring", "Proximal").position - proximal.position + palmNormal * 0.035f).normalized
                 : palmNormal;
-            Add(proximal, intermediate, holdsCigarette ? first : 4f, first, curlDirection);
-            Add(intermediate, distal, holdsCigarette ? second : 6f, second, curlDirection);
+            Add(proximal, intermediate, holdsCigarette || _standing ? first : 4f, first, curlDirection);
+            Add(intermediate, distal, holdsCigarette || _standing ? second : 6f, second, curlDirection);
         }
         void Add(Transform bone, Transform child, float restAngle, float drawAngle, Vector3 curlDirection)
         {
@@ -321,6 +341,16 @@ internal sealed class CustomDraw
     private void EvaluateExit()
     {
         var t = Smooth(ExitProgress);
+        if (_standing)
+        {
+            var weightStanding = 1f - Smooth(Mathf.Max(0f, (ExitProgress - 0.85f) / 0.15f));
+            var position = StandingHand(_restPosition, _exitHand, 1f - t);
+            _arm.Solve(position, Quaternion.Slerp(_exitHandRotation, _restRotation, t), StandingElbow(1f - t), weightStanding);
+            if (_mask) RelaxMaskWrist();
+            ApplyGrip(0f);
+            _smoke?.Tick(_eye, _eye.position);
+            return;
+        }
         var phases = HandMotion.Exit(ExitProgress);
         if (_shoulder != null) _shoulder.SetPositionAndRotation(Vector3.Lerp(_exitShoulderPosition, _shoulderPosition, phases.Retract), _shoulderRotation);
         if (_supportShoulder != null) _supportShoulder.SetPositionAndRotation(Vector3.Lerp(_exitSupportShoulderPosition, _supportShoulderPosition, phases.Retract), _supportShoulderRotation);
@@ -335,7 +365,7 @@ internal sealed class CustomDraw
             _eyeAtStart + _bodyRotation * new Vector3(-_side * 0.38f, -0.48f, 0.04f), weight);
         if (_mask) RelaxMaskWrist();
         ApplyGrip(0f);
-        _supportPose.Apply(false, true);
+        _supportPose?.Apply(false, true);
         _smoke?.Tick(_eye, _eye.position);
     }
 
@@ -409,9 +439,9 @@ internal sealed class CustomDraw
         if (!_mask) drawRotation = Quaternion.AngleAxis(-_side * 30f, _eye.forward) * drawRotation;
         var filterInHand = _cigarette.localPosition + _cigarette.localRotation * (_mask ? MaskModel.MouthPoint : new Vector3(0f, 0f, -0.02f));
         var drawPosition = mouth - drawRotation * filterInHand;
-        var position = Vector3.Lerp(_restPosition, drawPosition, blend);
+        var position = _standing ? StandingHand(_restPosition, drawPosition, blend) : Vector3.Lerp(_restPosition, drawPosition, blend);
         // A small outward arc keeps the raising hand away from the chest.
-        position += _bodyRotation * new Vector3(0.045f * Mathf.Sin(blend * Mathf.PI), 0f, 0f);
+        if (!_standing) position += _bodyRotation * new Vector3(0.045f * Mathf.Sin(blend * Mathf.PI), 0f, 0f);
         var weight = Smooth((Clock - _start) / 0.6f);
         if (_shoulder != null)
         {
@@ -422,21 +452,22 @@ internal sealed class CustomDraw
             _supportShoulder.SetPositionAndRotation(_supportShoulderPosition + _restSupportShoulderOffset * weight, _supportShoulderRotation);
         var elbow = _eyeAtStart + _bodyRotation * Vector3.Lerp(
             new Vector3(_side * 0.38f, -0.42f, 0.12f), new Vector3(_side * 0.30f, -0.34f, 0.10f), blend);
+        if (_standing) elbow = StandingElbow(blend);
         _arm.Solve(position, Quaternion.Slerp(_restRotation, drawRotation, blend), elbow, weight);
         // Follow the solved elbow-to-wrist direction rather than the body's forward axis.
         // Swing only: preserve the thumb-up roll, rail contact and exact mouth orientation.
         var forearmDirection = _hand.position - _forearm.position;
-        if (forearmDirection.sqrMagnitude > 0.000001f)
+        if (!_standing && forearmDirection.sqrMagnitude > 0.000001f)
         {
             var fingerDirection = _hand.rotation * (_handFrame * Vector3.forward);
             var correction = Quaternion.FromToRotation(fingerDirection, forearmDirection.normalized);
             _hand.rotation = Quaternion.Slerp(Quaternion.identity, correction, (1f - blend) * weight) * _hand.rotation;
         }
         if (_mask) RelaxMaskWrist();
-        _supportArm.Solve(_supportPosition, _supportRotation,
+        if (!_standing) _supportArm.Solve(_supportPosition, _supportRotation,
             _eyeAtStart + _bodyRotation * new Vector3(-_side * 0.38f, -0.42f, 0.1f), weight);
         ApplyGrip(blend);
-        _supportPose.Apply(blend == 0f && weight >= 1f, false);
+        if (!_standing) _supportPose?.Apply(blend == 0f && weight >= 1f, false);
 #if CONTACT_DIAGNOSTICS
         if (!_contactReported && blend == 0f && weight >= 1f)
         {
@@ -445,6 +476,12 @@ internal sealed class CustomDraw
         }
 #endif
     }
+
+    private Vector3 StandingHand(Vector3 rest, Vector3 mouth, float progress) =>
+        Vector3.Lerp(rest, mouth, progress) + _bodyRotation * new Vector3(0.025f * Mathf.Sin(progress * Mathf.PI), 0f, 0f);
+
+    private Vector3 StandingElbow(float progress) => _upperArmPosition + _bodyRotation *
+        Vector3.Lerp(new Vector3(0.07f, -0.26f, 0.16f), new Vector3(0.09f, -0.24f, 0.20f), progress);
 
     private void RelaxMaskWrist()
     {

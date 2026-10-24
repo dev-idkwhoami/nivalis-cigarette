@@ -16,6 +16,7 @@
     <ProjectReference Include="../api/Cigarette.Api.csproj" Condition="'$(EnableApi)' == 'true'" />
     <EmbeddedResource Include="../assets/icons/*.png" LogicalName="Cigarette.Icons.%(Filename)%(Extension)" />
     <EmbeddedResource Include="../assets/*.wav" LogicalName="Cigarette.Audio.%(Filename)%(Extension)" />
+    <Reference Include="Nivalis.ModCompanion" HintPath="$(GamePath)/BepInEx/plugins/Nivalis.ModCompanion.dll" Private="false" />
     <Reference Include="0Harmony" HintPath="$(GamePath)/BepInEx/core/0Harmony.dll" Private="false" />
     <Reference Include="BepInEx.Core" HintPath="$(GamePath)/BepInEx/core/BepInEx.Core.dll" Private="false" />
     <Reference Include="BepInEx.Unity.IL2CPP" HintPath="$(GamePath)/BepInEx/core/BepInEx.Unity.IL2CPP.dll" Private="false" />

@@ -11,6 +11,7 @@ using Il2CppInterop.Runtime.Injection;
 
 namespace NivalisMods.Cigarette;
 
+[BepInDependency("local.nivalis.modcompanion", BepInDependency.DependencyFlags.SoftDependency)]
 [BepInPlugin(Id, "Cigarette", Version)]
 public sealed class Plugin : BasePlugin
 {
@@ -42,6 +43,9 @@ public sealed class Plugin : BasePlugin
     internal static ConfigEntry<float> RgbShiftMaxPixels = null!;
     internal static ConfigEntry<float> BlurRadiusPixels = null!;
 
+    internal static ConfigEntry<bool> AllowSprinting = null!;
+    internal static Func<bool> StandingSmokePressed = () => false;
+
     internal static ConfigEntry<float> MouthHeight = null!;
     internal static ConfigEntry<float> MouthDistance = null!;
 
@@ -50,6 +54,7 @@ public sealed class Plugin : BasePlugin
         Logger = Log;
         var settings = new ConfigFile(Path.Combine(Paths.ConfigPath, "cigarette.cfg"), false,
             new BepInPlugin(Id, "Cigarette", Version)) { SaveOnConfigSet = false };
+        AllowSprinting = settings.Bind("Smoking", "AllowSprintingWhileSmoking", false, "Allow sprinting when walking smoking is available. Reserved for now; movement still ends smoking.");
         InhaleVolume = settings.Bind("Audio", "InhaleVolume", DefaultInhaleVolume, "Inhale sound volume (0–1); 0 mutes inhaling.");
         ExhaleVolume = settings.Bind("Audio", "ExhaleVolume", DefaultExhaleVolume, "Exhale sound volume (0–1); 0 mutes exhaling.");
         try { BreathAudio.LoadRecordings(); }
@@ -72,6 +77,11 @@ public sealed class Plugin : BasePlugin
         RgbShiftMaxPixels = settings.Bind("Cannabis", "RgbShiftMaxPixels", 15f, "Maximum animated RGB offset (0–32 pixels). Equal limits give a fixed amount; both 0 disable RGB. Reversed limits are sorted.");
         MouthHeight = settings.Bind("CustomDraw", "MouthHeightBelowEyes", -0.075f, "Mouth target vertical offset from camera in metres; negative is below eyes.");
         MouthDistance = settings.Bind("CustomDraw", "MouthDistanceFromEyes", 0.035f, "Filter endpoint distance forward of camera in metres.");
+        if (AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "Nivalis.ModCompanion"))
+        {
+            try { CompanionSettings.Register(settings); }
+            catch (Exception e) { Log.LogWarning("Mod Companion settings unavailable: " + e.Message); }
+        }
         settings.Save();
         settings.SaveOnConfigSet = true;
         new Harmony(Id).PatchAll(typeof(Plugin).Assembly);
@@ -83,6 +93,6 @@ public sealed class Plugin : BasePlugin
 #if CIGARETTE_API
         CigaretteApi.Register(Api);
 #endif
-        Log.LogInfo($"Cigarette {Version}: Left-click a nearby railing to choose cigarette, joint or inhalant mask. Movement and Escape cancel.");
+        Log.LogInfo($"Cigarette {Version}: Left-click a railing or use the standing-smoking hotkey. Configure the standing-smoking hotkey in Mod Companion. Movement and Escape cancel.");
     }
 }

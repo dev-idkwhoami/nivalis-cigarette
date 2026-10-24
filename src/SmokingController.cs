@@ -19,6 +19,7 @@ public sealed class SmokingController : MonoBehaviour
     internal static SmokingController? Instance;
     private PlayerHandsAnimator? _hands;
     private bool _active, _exiting;
+    private bool _standing;
     private SmokingEndReason _endReason;
 #if CIGARETTE_API
     private int _effectScene = -1, _effectPlayer;
@@ -96,11 +97,12 @@ public sealed class SmokingController : MonoBehaviour
             if (choice.HasValue)
             {
 #if CIGARETTE_API
-                var result = Plugin.Api.Sessions.TryStart((SmokingItem)choice.Value);
+                var result = _wheel.Standing ? TryStart(choice.Value, true) : Plugin.Api.Sessions.TryStart((SmokingItem)choice.Value);
                 if (!result.Success) Notice(result.Message);
 #else
-                if (CanSmokeAtRail())
+                if (CanStartSmoking(_wheel.Standing))
                 {
+                    if (_wheel.Standing) { StartSmoking(choice.Value, default, true); return; }
                     var character = PlayerManager._instance.LocalPlayer.Character;
                     if (RailingTarget.TryCandidate(character, out var top, out _) &&
                         RailingTarget.TryFacing(character, top, out var facing))
@@ -145,6 +147,7 @@ public sealed class SmokingController : MonoBehaviour
                 return;
             }
             if (!GameplayAvailable()) return;
+            if (!_active && Plugin.StandingSmokePressed() && CanStartSmoking(true)) { _wheel.Open(true); return; }
             if (!_active && Mouse.current?.leftButton.wasPressedThisFrame == true && CanSmokeAtRail()) _wheel.Open();
         }
         catch (Exception e)
@@ -177,13 +180,13 @@ public sealed class SmokingController : MonoBehaviour
     }
 
     [HideFromIl2Cpp]
-    internal ApiResult ValidateStart(SmokeKind kind)
+    internal ApiResult ValidateStart(SmokeKind kind, bool standing = false)
     {
         if (_active || _approach != null || _wheel.Busy) return new(ResultCode.Busy, "Smoking or the smoking wheel is already active.");
         if (!GameplayAvailable()) return new(ResultCode.GameplayUnavailable, "Gameplay is paused, unfocused, or blocked by UI.");
-        var position = ValidatePosition();
+        var position = standing ? new ApiResult(ResultCode.Success) : ValidatePosition();
         if (!position.Success) return position;
-        if (!CanSmokeAtRail()) return new(ResultCode.PlayerNotReady, "Stand idle on foot with empty hands and no active interaction.");
+        if (!CanStartSmoking(standing)) return new(ResultCode.PlayerNotReady, "Stand idle on foot with empty hands and no active interaction.");
         if (kind == SmokeKind.Mask && !MaskModel.Available()) return new(ResultCode.AssetsUnavailable, "Inhalant mask assets are not loaded here.");
         if (!Resources.FindObjectsOfTypeAll<AnimationClip>().Any(c => c.name == IdleClip))
             return new(ResultCode.AssetsUnavailable, "Smoking animation is not loaded here.");
@@ -191,11 +194,22 @@ public sealed class SmokingController : MonoBehaviour
     }
 
     [HideFromIl2Cpp]
-    internal ApiResult TryStart(SmokeKind kind)
+    internal ApiResult TryStart(SmokeKind kind, bool standing = false)
     {
-        var validation = ValidateStart(kind);
+        if (Plugin.Api.Items.GetAvailability((SmokingItem)kind) != ItemAvailability.Available)
+            return new(ResultCode.ItemDisabled, "Smoking item is disabled or hidden.");
+        if (Plugin.Api.Sessions.GetCurrent() != null) return new(ResultCode.Busy, "A smoking sequence is already active.");
+        var validation = ValidateStart(kind, standing);
         if (!validation.Success) return validation;
         var character = PlayerManager._instance.LocalPlayer.Character;
+        if (standing)
+        {
+            var standingId = Plugin.Api.Accept((SmokingItem)kind, Plugin.Api.Items.GetSettings((SmokingItem)kind).SessionDurationSeconds);
+            try { StartSmoking(kind, default, true); }
+            catch (Exception e) { Plugin.Logger.LogError(e); Stop("Failed to start standing smoking."); }
+            return _active ? new(ResultCode.Success, "Standing smoking started.", standingId)
+                : new(ResultCode.Failed, "Standing smoking could not start.", standingId);
+        }
         if (!RailingTarget.TryCandidate(character, out var top, out var reason) ||
             !RailingTarget.TryFacing(character, top, out var facing)) return new(ResultCode.InvalidPosition, reason);
         var id = Plugin.Api.Accept((SmokingItem)kind, Plugin.Api.Items.GetSettings((SmokingItem)kind).SessionDurationSeconds);
@@ -251,7 +265,7 @@ public sealed class SmokingController : MonoBehaviour
 #endif
 
     [HideFromIl2Cpp]
-    private void StartSmoking(SmokeKind kind, RaycastHit target)
+    private void StartSmoking(SmokeKind kind, RaycastHit target, bool standing = false)
     {
 #if CIGARETTE_API
         if (Plugin.Api.Items.GetAvailability((SmokingItem)kind) != ItemAvailability.Available)
@@ -275,8 +289,11 @@ public sealed class SmokingController : MonoBehaviour
 #endif
             return;
         }
-        if (!RailingTarget.TryTop(character, target.collider, target.point,
-            RailingTarget.MaximumDistance, out var railTop, out var targetReason))
+        _standing = standing;
+        var railTop = default(RaycastHit);
+        var targetReason = "";
+        if (!_standing && !RailingTarget.TryTop(character, target.collider, target.point,
+            RailingTarget.MaximumDistance, out railTop, out targetReason))
         {
 #if CIGARETTE_API
             FailStart(ResultCode.InvalidPosition, "Smoking setup cancelled: " + targetReason);
@@ -369,19 +386,22 @@ public sealed class SmokingController : MonoBehaviour
         _scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle;
         Evaluate(hands);
         _stance.AlignCustomBody(animator, character.transform.position, character.Controller.Rotation);
-        var movingAnchor = RailSurface.Boat.AnchorFor(railTop.collider);
+        var movingAnchor = _standing ? null : RailSurface.Boat.AnchorFor(railTop.collider);
         if (movingAnchor != null) _stance.Follow(movingAnchor);
         CreateCigarette(animator);
         if (_cigarette == null) throw new InvalidOperationException("No hand/held item available for smoking.");
         if (_cigarette != null)
         {
-            _customDraw = new CustomDraw(hands, character.Controller.Camera.transform, _cigarette.transform, character.Controller.Rotation, character, _session, railTop, _kind);
+            _customDraw = new CustomDraw(hands, character.Controller.Camera.transform, _cigarette.transform, character.Controller.Rotation, character, _session, railTop, _kind, _standing);
             if (movingAnchor != null) _customDraw.Follow(movingAnchor);
         }
         RailPrompt.Release();
-        _hud = new SmokingHud();
-        _hud.Hide();
-        Plugin.Logger.LogInfo($"Smoking session started: {_kind}, {_session.Duration} seconds.");
+        if (!_standing)
+        {
+            _hud = new SmokingHud();
+            _hud.Hide();
+        }
+        Plugin.Logger.LogInfo($"Smoking session started: {_kind}, {(_standing ? "chest pose" : "railing")}, {_session.Duration} seconds.");
 #if CIGARETTE_API
         Plugin.Api.Started();
 #endif
@@ -618,7 +638,10 @@ public sealed class SmokingController : MonoBehaviour
     }
 
     [HideFromIl2Cpp]
-    internal bool CanSmokeAtRail()
+    internal bool CanSmokeAtRail() => CanStartSmoking(false);
+
+    [HideFromIl2Cpp]
+    private bool CanStartSmoking(bool standing)
     {
 #if CIGARETTE_API
         if (!Plugin.Api.HasVisibleItems) return false;
@@ -632,7 +655,7 @@ public sealed class SmokingController : MonoBehaviour
             hands.IsSitting || hands.IsPlayingMealAnimation || hands.sleeping || hands.placingItem || hands.IsHoldingTray ||
             hands.Animator.GetBool(PlayerHandsAnimator.Param.Fishing)) return false;
         if (hands.Animator.IsInTransition(0) || hands.Animator.GetCurrentAnimatorStateInfo(0).fullPathHash != Animator.StringToHash(IdleState)) return false;
-        return RailingTarget.TryCandidate(character, out _, out _);
+        return standing || RailingTarget.TryCandidate(character, out _, out _);
     }
 
     [HideFromIl2Cpp]
