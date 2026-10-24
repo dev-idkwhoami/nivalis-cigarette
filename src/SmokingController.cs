@@ -243,15 +243,6 @@ public sealed class SmokingController : MonoBehaviour
     }
 
     [HideFromIl2Cpp]
-    internal void AvailabilityChanged(SmokeKind kind)
-    {
-        if (_wheel.Busy) _wheel.Close(); // Reopen with the new global state; stale selections cannot start.
-        if (_approach?.Kind == kind && Plugin.Api.Items.GetAvailability((SmokingItem)kind) != ItemAvailability.Available)
-            Stop(null, SmokingEndReason.AvailabilityChanged);
-        RailPrompt.Release();
-    }
-
-    [HideFromIl2Cpp]
     internal void RefreshEffects()
     {
         SynchronizeEffectContext();
@@ -272,6 +263,19 @@ public sealed class SmokingController : MonoBehaviour
 #endif
 
     [HideFromIl2Cpp]
+    internal void AvailabilityChanged(SmokeKind kind)
+    {
+        if (_wheel.Busy) _wheel.Close();
+        if (_approach?.Kind == kind && !Plugin.ItemAvailable(kind))
+#if CIGARETTE_API
+            Stop(null, SmokingEndReason.AvailabilityChanged);
+#else
+            Stop(null);
+#endif
+        RailPrompt.Release();
+    }
+
+    [HideFromIl2Cpp]
     private void StartSmoking(SmokeKind kind, RaycastHit target, bool standing = false)
     {
 #if CIGARETTE_API
@@ -281,6 +285,7 @@ public sealed class SmokingController : MonoBehaviour
         { Plugin.Api.End(SmokingEndReason.GameplayUnavailable, "Gameplay unavailable.", ResultCode.GameplayUnavailable); return; }
 #else
         Stop(null);
+        if (!Plugin.ItemAvailable(kind)) return;
 #endif
         var character = PlayerManager._instance.LocalPlayer.Character;
         var hands = character.Controller.HandsAnimator;
@@ -703,9 +708,8 @@ public sealed class SmokingController : MonoBehaviour
     [HideFromIl2Cpp]
     private bool CanStartSmoking(bool standing)
     {
-#if CIGARETTE_API
-        if (!Plugin.Api.HasVisibleItems) return false;
-#endif
+        if (!Plugin.ItemAvailable(SmokeKind.Cigarette) && !Plugin.ItemAvailable(SmokeKind.Joint) &&
+            !Plugin.ItemAvailable(SmokeKind.Mask)) return false;
         if (_active || _approach != null || !GameplayAvailable()) return false;
         var character = PlayerManager._instance.LocalPlayer.Character;
         var hands = character.Controller.HandsAnimator;

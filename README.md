@@ -72,3 +72,5 @@ Deployment requires a clean checkout, builds both archives, creates a missing ve
 | `tools/` | Build, installation and release helpers |
 
 See [local railing development](docs/rail-development.md) for unsupported-surface tooling. Development mods are excluded from release archives.
+
+In Mod Companion, **General** lets you enable cigarettes, cannabis and the inhalant mask individually. One available item starts directly from the hotkey or railing; multiple items open the wheel. Turning everything off prevents new smoking sessions. User preferences take precedence over API availability restrictions.

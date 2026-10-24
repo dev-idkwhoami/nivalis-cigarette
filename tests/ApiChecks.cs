@@ -9,6 +9,7 @@ internal static class ApiChecks
         Check(!typeof(CigaretteApi).Assembly.GetReferencedAssemblies().Any(a =>
             a.Name!.StartsWith("Unity") || a.Name.StartsWith("BepInEx") || a.Name == "Nivalis.Cigarette"),
             "API library must load without the game/mod.");
+        CheckUserPreferences();
         var runtime = new FakeRuntime();
         var errors = new List<Exception>();
         var service = new ApiService(runtime, errors.Add);
@@ -149,6 +150,46 @@ internal static class ApiChecks
         Check(threadError is InvalidOperationException, "Game API rejects off-main-thread access.");
         Console.WriteLine("PASS: optional API discovery, global availability, validation, lifecycle, consumption, effects, exception isolation, reentrancy and thread contract.");
     }
+    private static void CheckUserPreferences()
+    {
+        var runtime = new FakeRuntime { IsReady = true };
+        var service = new ApiService(runtime, _ => { });
+        runtime.Service = service;
+        var snapshot = service.GetUserEnabledItems();
+        Check(snapshot.Count == 3, "All user preferences default on.");
+        var changes = new List<ItemAvailabilityChangedEvent>();
+        service.ItemAvailabilityChanged += changes.Add;
+        foreach (var item in Enum.GetValues<SmokingItem>())
+        {
+            service.SetUserEnabled(item, false);
+            foreach (var restriction in Enum.GetValues<ItemAvailability>())
+            {
+                service.SetAvailability(item, restriction);
+                Check(!service.IsEnabledByUser(item) && service.GetAvailability(item) == ItemAvailability.Hidden,
+                    "API cannot override a disabled user preference.");
+                Check(service.TryStart(item).Code == ResultCode.ItemDisabled, "User-disabled blocks start.");
+            }
+            service.SetAvailability(item, ItemAvailability.Disabled);
+            service.SetUserEnabled(item, true);
+            Check(service.GetAvailability(item) == ItemAvailability.Disabled, "Reenabling preserves API restriction.");
+            service.SetUserEnabled(item, false);
+        }
+        service.DispatchEvents();
+        Check(changes.Count == 9, "Only effective availability changes emit events.");
+        Check(service.GetUserEnabledItems().Count == 0 && snapshot.Count == 3, "Preference snapshots stay unchanged.");
+        Throws<NotSupportedException>(() => ((IList<SmokingItem>)snapshot)[0] = SmokingItem.Joint);
+        Throws<ArgumentOutOfRangeException>(() => service.IsEnabledByUser((SmokingItem)42));
+        service.SetAvailability(SmokingItem.Joint, ItemAvailability.Available);
+        service.SetUserEnabled(SmokingItem.Joint, true);
+        service.TryStart(SmokingItem.Joint);
+        service.SetUserEnabled(SmokingItem.Joint, false);
+        Check(service.GetState() == SmokingState.Idle, "User disable cancels pending approach.");
+        service.SetUserEnabled(SmokingItem.Joint, true);
+        service.TryStart(SmokingItem.Joint); service.Started();
+        service.SetUserEnabled(SmokingItem.Joint, false);
+        Check(service.GetState() == SmokingState.Smoking, "User disable allows active session to finish.");
+    }
+
     private static void Check(bool value, string description) { if (!value) throw new Exception(description); }
     private static void Throws<T>(Action action) where T : Exception
     {

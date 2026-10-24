@@ -1,6 +1,6 @@
 # Cigarette integration API
 
-Namespace: `NivalisMods.Cigarette.Api` · Contract version: **1** · [Public contract](api/CigaretteApi.cs)
+Namespace: `NivalisMods.Cigarette.Api` · Contract version: **2** · [Public contract](api/CigaretteApi.cs)
 
 ## Setup and discovery
 
@@ -39,8 +39,10 @@ if (!CigaretteApi.TryGetInstance(out var api))
 
 | `api.Items` method | Result / behavior |
 | --- | --- |
-| `GetAvailability(item)` | Returns `ItemAvailability`; defaults to `Available`. |
-| `SetAvailability(item, availability)` | Changes global availability. Repeating the current value is a no-op. |
+| `GetUserEnabledItems()` | Immutable snapshot of user-enabled items, before API restrictions. |
+| `IsEnabledByUser(item)` | Read-only user preference for one item. |
+| `GetAvailability(item)` | Effective `ItemAvailability`: user-disabled items always return `Hidden`. |
+| `SetAvailability(item, availability)` | Sets the in-memory API restriction; cannot enable user-disabled items. |
 | `GetSettings(item)` | Returns an immutable `ItemSettings` snapshot. |
 
 | Availability | Wheel | API start |
@@ -49,9 +51,11 @@ if (!CigaretteApi.TryGetInstance(out var api))
 | `Disabled` | Visible, inactive | Rejected |
 | `Hidden` | Omitted | Rejected |
 
-Changes close the open wheel. Disabling/hiding cancels a pending approach but lets an already-started session finish; use `Sessions.Stop()` to stop it. Hiding every item removes the railing prompt.
+Changes close the open wheel. Disabling/hiding cancels a pending approach but lets an already-started session finish; use `Sessions.Stop()` to stop it. With no effectively available items, the railing prompt and hotkey selection are suppressed. Exactly one available item starts directly; two or more open the wheel.
 
-Availability is **global, in-memory and last-write-wins**. It does not edit config. Other mods can overwrite it; avoid blindly restoring stale values. Contract 1 does not support registering custom items.
+User preferences always take precedence. There is no public setter for them. API restrictions are **global, in-memory and last-write-wins between mods**. They never edit config. Reenabling a user preference reveals the most recent API restriction. Availability events report effective changes only. Preference queries describe the user settings even when an API restriction hides or disables an item.
+
+Contract 2 adds the two read-only preference queries. Ship the updated API DLL with integrations that use them. Existing methods remain available. Custom items are not supported.
 
 ```csharp
 // Example inventory policy; unlocked and quantity come from your mod.

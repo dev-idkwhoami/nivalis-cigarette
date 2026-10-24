@@ -23,6 +23,7 @@ internal sealed class ApiService : ICigaretteApi, IItemsApi, ISessionsApi, IEffe
     private readonly Action<Exception> _log;
     private readonly int _thread = Environment.CurrentManagedThreadId;
     private readonly ItemAvailability[] _availability = new ItemAvailability[3];
+    private readonly bool[] _userEnabled = { true, true, true };
     private readonly bool[] _automatic = { true, true, true };
     private readonly bool[] _enabled = { true, true, true };
     private readonly float[] _remaining = new float[3], _strength = new float[3];
@@ -53,19 +54,39 @@ internal sealed class ApiService : ICigaretteApi, IItemsApi, ISessionsApi, IEffe
         if (!Enum.IsDefined(typeof(T), value)) throw new ArgumentOutOfRangeException(nameof(value));
         return Convert.ToInt32(value);
     }
-    public ItemAvailability GetAvailability(SmokingItem item) => _availability[Index(item)];
+    public IReadOnlyList<SmokingItem> GetUserEnabledItems()
+    {
+        CheckThread();
+        return Array.AsReadOnly(Enum.GetValues<SmokingItem>().Where(IsEnabledByUser).ToArray());
+    }
+    public bool IsEnabledByUser(SmokingItem item) => _userEnabled[Index(item)];
+    public ItemAvailability GetAvailability(SmokingItem item) =>
+        IsEnabledByUser(item) ? _availability[Index(item)] : ItemAvailability.Hidden;
     public void SetAvailability(SmokingItem item, ItemAvailability availability)
     {
         var i = Index(item);
         Index(availability);
-        var previous = _availability[i];
-        if (previous == availability) return;
+        var previous = GetAvailability(item);
         _availability[i] = availability;
-        var change = new ItemAvailabilityChangedEvent(item, previous, availability);
+        NotifyAvailability(item, previous);
+    }
+    // Only configuration owns this preference; deliberately absent from the public API.
+    internal void SetUserEnabled(SmokingItem item, bool enabled)
+    {
+        var i = Index(item);
+        var previous = GetAvailability(item);
+        _userEnabled[i] = enabled;
+        NotifyAvailability(item, previous);
+    }
+    private void NotifyAvailability(SmokingItem item, ItemAvailability previous)
+    {
+        var current = GetAvailability(item);
+        if (previous == current) return;
+        var change = new ItemAvailabilityChangedEvent(item, previous, current);
         Queue(() => Emit(ItemAvailabilityChanged, change));
         _runtime.AvailabilityChanged(item);
     }
-    internal bool HasVisibleItems => _availability.Any(a => a != ItemAvailability.Hidden);
+    internal bool HasVisibleItems => Enum.GetValues<SmokingItem>().Any(i => GetAvailability(i) != ItemAvailability.Hidden);
     public ItemSettings GetSettings(SmokingItem item) { Index(item); return _runtime.GetSettings(item); }
     SessionSettings ISessionsApi.GetSettings() { CheckThread(); return _runtime.GetSessionSettings(); }
     public EffectSettings GetSettings() { CheckThread(); return _runtime.GetEffectSettings(); }

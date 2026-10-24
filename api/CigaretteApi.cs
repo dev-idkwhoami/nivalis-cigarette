@@ -10,7 +10,7 @@ namespace NivalisMods.Cigarette.Api;
 public static class CigaretteApi
 {
     public const string PluginId = "local.nivalis.cigarette";
-    public const int ContractVersion = 1;
+    public const int ContractVersion = 2;
     private static ICigaretteApi? _instance;
 
     /// <summary>Safe on any thread. False when Cigarette has not registered an implementation.</summary>
@@ -80,6 +80,11 @@ public interface ICigaretteApi
 }
 public interface IItemsApi
 {
+    /// <summary>Immutable snapshot of user-enabled items, before API restrictions.</summary>
+    IReadOnlyList<SmokingItem> GetUserEnabledItems();
+    /// <summary>Read-only Mod Companion preference. API restrictions do not change it.</summary>
+    bool IsEnabledByUser(SmokingItem item);
+    /// <summary>Effective availability: user-disabled items are always Hidden.</summary>
     ItemAvailability GetAvailability(SmokingItem item);
     void SetAvailability(SmokingItem item, ItemAvailability availability);
     ItemSettings GetSettings(SmokingItem item);

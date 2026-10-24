@@ -43,6 +43,16 @@ public sealed class Plugin : BasePlugin
     internal static ConfigEntry<float> RgbShiftMaxPixels = null!;
     internal static ConfigEntry<float> BlurRadiusPixels = null!;
 
+    internal static ConfigEntry<bool>[] EnabledItems = null!;
+    internal static bool ItemAvailable(SmokeKind kind)
+    {
+#if CIGARETTE_API
+        return Api.GetAvailability((SmokingItem)kind) == ItemAvailability.Available;
+#else
+        return EnabledItems[(int)kind].Value;
+#endif
+    }
+
     internal static ConfigEntry<bool> AllowSprinting = null!;
     internal static Func<bool> StandingSmokePressed = () => false;
 
@@ -54,6 +64,12 @@ public sealed class Plugin : BasePlugin
         Logger = Log;
         var settings = new ConfigFile(Path.Combine(Paths.ConfigPath, "cigarette.cfg"), false,
             new BepInPlugin(Id, "Cigarette", Version)) { SaveOnConfigSet = false };
+        EnabledItems = new[]
+        {
+            settings.Bind("General", "EnableCigarette", true, "Offer cigarettes when starting smoking."),
+            settings.Bind("General", "EnableCannabis", true, "Offer cannabis when starting smoking."),
+            settings.Bind("General", "EnableInhalantMask", true, "Offer the inhalant mask when starting smoking.")
+        };
         AllowSprinting = settings.Bind("Smoking", "AllowSprintingWhileSmoking", false, "Allow sprinting during free smoking. Walking is always allowed; off by default.");
         InhaleVolume = settings.Bind("Audio", "InhaleVolume", DefaultInhaleVolume, "Inhale sound volume (0–1); 0 mutes inhaling.");
         ExhaleVolume = settings.Bind("Audio", "ExhaleVolume", DefaultExhaleVolume, "Exhale sound volume (0–1); 0 mutes exhaling.");
@@ -89,6 +105,21 @@ public sealed class Plugin : BasePlugin
 #if CIGARETTE_API
         Api = new ApiService(new GameApiRuntime(), e => Logger.LogError("Cigarette API subscriber failed: " + e));
 #endif
+        for (var i = 0; i < EnabledItems.Length; i++)
+        {
+            var kind = (SmokeKind)i;
+#if CIGARETTE_API
+            Api.SetUserEnabled((SmokingItem)kind, EnabledItems[i].Value);
+#endif
+            EnabledItems[i].SettingChanged += (_, _) =>
+            {
+#if CIGARETTE_API
+                Api.SetUserEnabled((SmokingItem)kind, EnabledItems[(int)kind].Value);
+#else
+                SmokingController.Instance?.AvailabilityChanged(kind);
+#endif
+            };
+        }
         AddComponent<SmokingController>();
 #if CIGARETTE_API
         CigaretteApi.Register(Api);

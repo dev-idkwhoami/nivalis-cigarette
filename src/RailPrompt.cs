@@ -37,7 +37,7 @@ internal static class RailPrompt
                 color.a = 1f;
                 text.color = color;
                 text.canvasRenderer.SetAlpha(1f);
-                text.text = "Choose smoking item";
+                text.text = "Start smoking";
                 return false;
             }
         }

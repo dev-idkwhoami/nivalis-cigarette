@@ -35,10 +35,21 @@ internal sealed class SmokingWheel
         var character = PlayerManager._instance?.LocalPlayer?.Character;
         var hit = default(RaycastHit);
         _standing = standing;
-        if (wheel == null || wheel.IsOpen || character == null ||
+        if ((wheel != null && wheel.IsOpen) || character == null ||
             (!_standing && !RailingTarget.TryCandidate(character, out hit, out _))) return;
         _character = character; _rail = hit.collider;
         _scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle;
+        var available = Enum.GetValues<SmokeKind>().Where(Plugin.ItemAvailable).ToArray();
+        if (available.Length == 0) return;
+        if (available.Length == 1)
+        {
+            _choice = available[0];
+            _choiceFrame = Time.frameCount;
+            _deadline = Time.unscaledTime + 2f;
+            RailPrompt.Release();
+            return;
+        }
+        if (wheel == null) return;
         _wheel = wheel;
         try
         {
@@ -49,14 +60,14 @@ internal sealed class SmokingWheel
 #if CIGARETTE_API
                 var availability = Plugin.Api.Items.GetAvailability((SmokingItem)kind);
                 if (availability == ItemAvailability.Hidden) continue;
+#else
+                if (!Plugin.ItemAvailable(kind)) continue;
 #endif
                 var selected = kind;
                 var label = kind == SmokeKind.Mask ? "Inhalant mask" : kind.ToString();
                 wheel.AddAction(_icons[(int)kind], label, false, (Il2CppSystem.Action)(() =>
                 {
-#if CIGARETTE_API
-                    if (Plugin.Api.Items.GetAvailability((SmokingItem)selected) != ItemAvailability.Available) return;
-#endif
+                    if (!Plugin.ItemAvailable(selected)) return;
                     _choice = selected;
                     _choiceFrame = Time.frameCount;
                     _deadline = Time.unscaledTime + 2f;
@@ -98,6 +109,7 @@ internal sealed class SmokingWheel
         if (!SmokingController.GameplayAvailable()) return null;
         var choice = _choice;
         _choice = null;
+        if (!Plugin.ItemAvailable(choice.Value)) return null;
         if (!_standing && (!RailingTarget.TryCandidate(_character, out var hit, out _) || hit.collider != _rail)) return null;
         return choice;
     }
