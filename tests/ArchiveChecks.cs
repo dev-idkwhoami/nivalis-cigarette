@@ -2,10 +2,10 @@ using System.IO.Compression;
 
 internal static class ArchiveChecks
 {
-    internal static void Run(string variant, string assemblyPath, string archivePath)
+    internal static void Run(string variant, string assemblyPath, string archivePath, string companionPath)
     {
         if (variant != "standalone" && variant != "api") throw new Exception("Unknown archive variant");
-        var files = new List<string> { "Nivalis.Cigarette.dll" };
+        var files = new List<string> { "Nivalis.Cigarette.dll", "Nivalis.ModCompanion.dll" };
         if (variant == "api") files.Add("Nivalis.Cigarette.Api.dll");
         var expected = files.Select(name => "BepInEx/plugins/" + name).OrderBy(name => name).ToArray();
         using var archive = ZipFile.OpenRead(archivePath);
@@ -17,7 +17,8 @@ internal static class ArchiveChecks
             using var source = entry.Open();
             using var bytes = new MemoryStream();
             source.CopyTo(bytes);
-            var built = File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, entry.Name));
+            var built = File.ReadAllBytes(entry.Name == "Nivalis.ModCompanion.dll" ? companionPath :
+                Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, entry.Name));
             if (!bytes.ToArray().SequenceEqual(built)) throw new Exception("Archive contains stale/wrong DLL: " + entry.FullName);
         }
         Console.WriteLine($"PASS: {variant} archive contains exactly the expected DLLs with byte-identical build output.");

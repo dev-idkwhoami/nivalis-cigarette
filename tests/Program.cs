@@ -1,7 +1,7 @@
 using NivalisMods.Cigarette;
-if (args.Length == 4 && args[0] == "--check-archive")
+if (args.Length == 5 && args[0] == "--check-archive")
 {
-    ArchiveChecks.Run(args[1], args[2], args[3]);
+    ArchiveChecks.Run(args[1], args[2], args[3], args[4]);
     return;
 }
 ApiChecks.Run();

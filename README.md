@@ -7,7 +7,7 @@ A BepInEx IL2CPP mod for **Nivalis Nights**, adding cigarettes, joints and an in
 - .NET SDK 8 (the mod targets .NET 6; managed checks target .NET 8).
 - GNU Make, Bash and standard Unix utilities.
 - The game initialized with BepInEx 6 IL2CPP.
-- Mod Companion 1.0.3 or newer in `BepInEx/plugins/` for compilation and the configurable standing hotkey (optional for railing-only play).
+- Mod Companion is included in both downloads and provides the configurable hotkey and in-game settings. Builds use the shared DLL in `dependencies/`.
 
 Launch the game with BepInEx once to generate bindings. Builds reference its `BepInEx/core/` and `BepInEx/interop/` assemblies. Run commands from this repository’s root.
 
@@ -38,7 +38,7 @@ Pass `GAME_PATH="..."` to game-dependent targets. Release archives go to `bin/`:
 - **`Nivalis.Cigarette-<version>.zip`** — standalone, for normal play.
 - **`Nivalis.Cigarette-<version>-API.zip`** — includes integration support for cooperating mods.
 
-Extract one archive into the game directory. Both variants replace the same mod DLL under `BepInEx/plugins/`; install only one at a time. Configuration is preserved.
+Extract one archive into the game directory. Both variants replace the same mod DLL under `BepInEx/plugins/`; install only one at a time. Configuration is preserved. Both archives include `Nivalis.ModCompanion.dll` at the shared plugin path; allow it to replace the existing copy. Archives contain only DLLs.
 
 ## Configuration and controls
 

@@ -48,10 +48,14 @@ check-package:
 	@$(MAKE) check-package-api
 
 install: build-standalone
+	@(cd dependencies && sha256sum --check SHA256SUMS)
+	@install -Dm644 dependencies/Nivalis.ModCompanion.dll "$$GAME_PATH/BepInEx/plugins/Nivalis.ModCompanion.dll"
 	@install -Dm644 bin/standalone/Nivalis.Cigarette.dll "$$GAME_PATH/BepInEx/plugins/Nivalis.Cigarette.dll"
 	@rm -f -- "$$GAME_PATH/BepInEx/plugins/Cigarette.dll"
 
 install-api: build-api
+	@(cd dependencies && sha256sum --check SHA256SUMS)
+	@install -Dm644 dependencies/Nivalis.ModCompanion.dll "$$GAME_PATH/BepInEx/plugins/Nivalis.ModCompanion.dll"
 	@install -Dm644 bin/api/Nivalis.Cigarette.dll "$$GAME_PATH/BepInEx/plugins/Nivalis.Cigarette.dll"
 	@install -Dm644 bin/api/Nivalis.Cigarette.Api.dll "$$GAME_PATH/BepInEx/plugins/Nivalis.Cigarette.Api.dll"
 	@rm -f -- "$$GAME_PATH/BepInEx/plugins/Cigarette.dll"
