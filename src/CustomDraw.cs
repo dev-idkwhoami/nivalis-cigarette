@@ -121,10 +121,10 @@ internal sealed class CustomDraw
             _upperArmPosition = upper.position;
             // Keep the native shoulder anchors and solve a short, bent-arm draw.
             // No lowered-arm transport, shoulder widening or axial-roll overrides.
-            _restPosition = eye.position + bodyRotation * new Vector3(0.20f, -0.32f, 0.25f);
+            _restPosition = eye.position + bodyRotation * new Vector3(0.07f, -0.32f, 0.28f);
             var palm = -(bodyRotation * Vector3.forward);
             if (_mask) palm = (palm + Vector3.up * 0.65f).normalized;
-            _restRotation = Quaternion.LookRotation(bodyRotation * new Vector3(-1f, 0.15f, 0.05f), palm) * Quaternion.Inverse(handFrame);
+            _restRotation = Quaternion.LookRotation(bodyRotation * new Vector3(-1f, 0.15f, 0.45f), palm) * Quaternion.Inverse(handFrame);
             // The free arm stays in its sampled native idle pose.
             _supportPosition = _supportHand.position;
             _supportRotation = _supportHand.rotation;
@@ -481,7 +481,7 @@ internal sealed class CustomDraw
         Vector3.Lerp(rest, mouth, progress) + _bodyRotation * new Vector3(0.025f * Mathf.Sin(progress * Mathf.PI), 0f, 0f);
 
     private Vector3 StandingElbow(float progress) => _upperArmPosition + _bodyRotation *
-        Vector3.Lerp(new Vector3(0.07f, -0.26f, 0.16f), new Vector3(0.09f, -0.24f, 0.20f), progress);
+        Vector3.Lerp(new Vector3(0.18f, -0.16f, 0.16f), new Vector3(0.09f, -0.24f, 0.20f), progress);
 
     private void RelaxMaskWrist()
     {
