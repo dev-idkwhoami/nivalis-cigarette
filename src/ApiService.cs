@@ -86,7 +86,6 @@ internal sealed class ApiService : ICigaretteApi, IItemsApi, ISessionsApi, IEffe
         Queue(() => Emit(ItemAvailabilityChanged, change));
         _runtime.AvailabilityChanged(item);
     }
-    internal bool HasVisibleItems => Enum.GetValues<SmokingItem>().Any(i => GetAvailability(i) != ItemAvailability.Hidden);
     public ItemSettings GetSettings(SmokingItem item) { Index(item); return _runtime.GetSettings(item); }
     SessionSettings ISessionsApi.GetSettings() { CheckThread(); return _runtime.GetSessionSettings(); }
     public EffectSettings GetSettings() { CheckThread(); return _runtime.GetEffectSettings(); }

@@ -195,7 +195,7 @@ public sealed class SmokingController : MonoBehaviour
         if (!position.Success) return position;
         if (!CanStartSmoking(standing)) return new(ResultCode.PlayerNotReady, "Stand idle on foot with empty hands and no active interaction.");
         if (kind == SmokeKind.Mask && !MaskModel.Available()) return new(ResultCode.AssetsUnavailable, "Inhalant mask assets are not loaded here.");
-        if (!Resources.FindObjectsOfTypeAll<AnimationClip>().Any(c => c.name == IdleClip))
+        if (!standing && !Resources.FindObjectsOfTypeAll<AnimationClip>().Any(c => c.name == IdleClip))
             return new(ResultCode.AssetsUnavailable, "Smoking animation is not loaded here.");
         return new(ResultCode.Success);
     }
@@ -324,8 +324,8 @@ public sealed class SmokingController : MonoBehaviour
             return;
         }
         var clipName = IdleClip;
-        var clip = Resources.FindObjectsOfTypeAll<AnimationClip>().FirstOrDefault(c => c.name == clipName);
-        if (clip == null)
+        var clip = _standing ? null : Resources.FindObjectsOfTypeAll<AnimationClip>().FirstOrDefault(c => c.name == clipName);
+        if (!_standing && clip == null)
         {
 #if CIGARETTE_API
             FailStart(ResultCode.AssetsUnavailable, "Smoking clip is not loaded here. Try a populated street.");
@@ -346,7 +346,7 @@ public sealed class SmokingController : MonoBehaviour
             return;
         }
         if (animator.runtimeAnimatorController == null || !animator.HasState(0, Animator.StringToHash(IdleState)) ||
-            !animator.runtimeAnimatorController.animationClips.Any(c => c.name == IdleClip))
+            (!_standing && !animator.runtimeAnimatorController.animationClips.Any(c => c.name == IdleClip)))
             throw new InvalidOperationException("The player hands controller does not match the inspected build.");
 
         _originalController = animator.runtimeAnimatorController;

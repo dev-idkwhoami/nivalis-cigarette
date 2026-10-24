@@ -128,12 +128,11 @@ internal sealed class CustomDraw
             var upper = hands.Animator.GetBoneTransform(HumanBodyBones.RightUpperArm);
             _upperArmPosition = upper.position;
             // Keep the native shoulder anchors and solve a short, bent-arm draw.
-            // No lowered-arm transport, shoulder widening or axial-roll overrides.
             _restPosition = eye.position + bodyRotation * new Vector3(0.07f, -0.32f, 0.252f);
             var palm = -(bodyRotation * Vector3.forward);
             if (_mask) palm = (palm + Vector3.up * 0.65f).normalized;
             _restRotation = Quaternion.LookRotation(bodyRotation * new Vector3(-1f, 0.15f, 0.45f), palm) * Quaternion.Inverse(handFrame);
-            // The free arm stays in its sampled native idle pose.
+            // Capture the native free-arm baseline for gait sway.
             _supportPosition = _supportHand.position;
             _supportRotation = _supportHand.rotation;
         }

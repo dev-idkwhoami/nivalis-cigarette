@@ -105,7 +105,7 @@ internal sealed class SmokingWheel
         if (!_choice.HasValue || Time.frameCount <= _choiceFrame || Time.frameCount <= _closedFrame) return null;
         if (Time.unscaledTime > _deadline) { Close(); return null; }
         // Wait for the native window to release its gameplay locks. The controller
-        // revalidates hands, movement and the selected style before starting.
+        // revalidates hands, gameplay state and the selected item before starting.
         if (!SmokingController.GameplayAvailable()) return null;
         var choice = _choice;
         _choice = null;

@@ -39,9 +39,9 @@ internal static class ApiChecks
         Throws<ArgumentOutOfRangeException>(() => api.Items.SetAvailability(SmokingItem.Joint, (ItemAvailability)42));
         Throws<ArgumentOutOfRangeException>(() => api.Items.GetAvailability((SmokingItem)42));
         foreach (var item in Enum.GetValues<SmokingItem>()) api.Items.SetAvailability(item, ItemAvailability.Hidden);
-        Check(!service.HasVisibleItems, "All hidden removes the prompt/wheel entry opportunity.");
+        Check(Enum.GetValues<SmokingItem>().All(item => service.GetAvailability(item) == ItemAvailability.Hidden), "All items hidden.");
         api.Items.SetAvailability(SmokingItem.Joint, ItemAvailability.Disabled);
-        Check(service.HasVisibleItems, "Disabled items remain visible.");
+        Check(service.GetAvailability(SmokingItem.Joint) == ItemAvailability.Disabled, "Disabled items remain visible.");
         api.Items.SetAvailability(SmokingItem.Joint, ItemAvailability.Available);
         runtime.Validation = new(ResultCode.InvalidPosition, "No railing.");
         Check(!api.Sessions.TryStart(SmokingItem.Joint).Success && runtime.StartCount == 0, "Rejected positions cannot start.");

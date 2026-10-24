@@ -46,6 +46,8 @@ Settings live in `BepInEx/config/cigarette.cfg`, including per-item durations in
 
 Face a nearby railing with empty hands and look down. Left-click to choose an item. For standing smoking, press **X** with empty hands away from an interaction target; rebind this under **Mod Companion → Cigarette → Controls → Start / stop smoking**. Standing uses a single chest-height resting pose. Standing and walking share one continuous session, with mostly vertical sway following the native free-arm animation. Native hand playback runs at 50% speed while walking during free smoking and at normal speed while sprinting; player movement speed and smoking timing are unchanged. Press the same hotkey again or interact with something to end free smoking; items still finish when consumed. Sprinting is disabled by default and can be enabled in Mod Companion. Movement or Escape still stops railing smoking. Joints produce visual effects and hallucinations, while the mask produces temporary slow motion. The boat’s rear-deck rails are supported.
 
+In Mod Companion, **General** lets you enable cigarettes, cannabis and the inhalant mask individually. One available item starts directly from the hotkey or railing; multiple items open the wheel. Turning everything off prevents new smoking sessions. User preferences take precedence over API availability restrictions.
+
 ## Mod integration API
 
 The optional API lets other mods start smoking sessions, react to consumption, control item availability and manage effects. See [API documentation](API.md) for setup, methods, events and examples.
@@ -72,5 +74,3 @@ Deployment requires a clean checkout, builds both archives, creates a missing ve
 | `tools/` | Build, installation and release helpers |
 
 See [local railing development](docs/rail-development.md) for unsupported-surface tooling. Development mods are excluded from release archives.
-
-In Mod Companion, **General** lets you enable cigarettes, cannabis and the inhalant mask individually. One available item starts directly from the hotkey or railing; multiple items open the wheel. Turning everything off prevents new smoking sessions. User preferences take precedence over API availability restrictions.

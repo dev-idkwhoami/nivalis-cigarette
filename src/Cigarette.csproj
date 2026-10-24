@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <AssemblyName>Nivalis.Cigarette</AssemblyName>
-    <Version>1.3.0</Version>
+    <Version>1.4.0</Version>
   </PropertyGroup>
   <PropertyGroup Condition="'$(EnableApi)' == 'true'">
     <DefineConstants>$(DefineConstants);CIGARETTE_API</DefineConstants>
