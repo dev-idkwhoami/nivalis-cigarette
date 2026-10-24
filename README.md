@@ -1,6 +1,6 @@
 # Cigarette
 
-A BepInEx IL2CPP mod for **Nivalis Nights**, adding cigarettes, joints and an inhalant mask at railings or while standing still. This repository contains smoking animations, railing alignment, visual effects and an optional integration API.
+A BepInEx IL2CPP mod for **Nivalis Nights**, adding cigarettes, joints and an inhalant mask at railings or while standing or walking. This repository contains smoking animations, railing alignment, visual effects and an optional integration API.
 
 ## Requirements
 
@@ -44,7 +44,7 @@ Extract one archive into the game directory. Both variants replace the same mod 
 
 Settings live in `BepInEx/config/cigarette.cfg`, including per-item durations in **seconds**, audio levels and after-effects.
 
-Face a nearby railing with empty hands and look down. Left-click to choose an item. For standing smoking, press **F8** with empty hands away from an interaction target; rebind this under **Mod Companion → Cigarette → Controls → Smoke while standing**. Standing uses a single chest-height resting pose. Movement or Escape stops the session. The sprint toggle is reserved for future walking support and has no effect yet. Joints produce visual effects and hallucinations, while the mask produces temporary slow motion. The boat’s rear-deck rails are supported.
+Face a nearby railing with empty hands and look down. Left-click to choose an item. For standing smoking, press **F8** with empty hands away from an interaction target; rebind this under **Mod Companion → Cigarette → Controls → Start / stop smoking**. Standing uses a single chest-height resting pose. Standing and walking share one continuous session, with sway following the native free-arm animation. Press the same hotkey again or interact with something to end free smoking; items still finish when consumed. Sprinting is disabled by default and can be enabled in Mod Companion. Movement or Escape still stops railing smoking. Joints produce visual effects and hallucinations, while the mask produces temporary slow motion. The boat’s rear-deck rails are supported.
 
 ## Mod integration API
 

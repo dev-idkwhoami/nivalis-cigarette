@@ -54,7 +54,7 @@ public sealed class Plugin : BasePlugin
         Logger = Log;
         var settings = new ConfigFile(Path.Combine(Paths.ConfigPath, "cigarette.cfg"), false,
             new BepInPlugin(Id, "Cigarette", Version)) { SaveOnConfigSet = false };
-        AllowSprinting = settings.Bind("Smoking", "AllowSprintingWhileSmoking", false, "Allow sprinting when walking smoking is available. Reserved for now; movement still ends smoking.");
+        AllowSprinting = settings.Bind("Smoking", "AllowSprintingWhileSmoking", false, "Allow sprinting during free smoking. Walking is always allowed; off by default.");
         InhaleVolume = settings.Bind("Audio", "InhaleVolume", DefaultInhaleVolume, "Inhale sound volume (0–1); 0 mutes inhaling.");
         ExhaleVolume = settings.Bind("Audio", "ExhaleVolume", DefaultExhaleVolume, "Exhale sound volume (0–1); 0 mutes exhaling.");
         try { BreathAudio.LoadRecordings(); }
@@ -93,6 +93,6 @@ public sealed class Plugin : BasePlugin
 #if CIGARETTE_API
         CigaretteApi.Register(Api);
 #endif
-        Log.LogInfo($"Cigarette {Version}: Left-click a railing or use the standing-smoking hotkey. Configure the standing-smoking hotkey in Mod Companion. Movement and Escape cancel.");
+        Log.LogInfo($"Cigarette {Version}: Left-click a railing or use the standing-smoking hotkey. Configure the standing-smoking hotkey in Mod Companion. Press the hotkey again or interact to end free smoking. Movement and Escape cancel railing smoking.");
     }
 }

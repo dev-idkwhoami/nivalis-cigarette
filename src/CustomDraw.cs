@@ -35,6 +35,11 @@ internal sealed class CustomDraw
     private readonly SmokingSession _session;
     private readonly bool _mask;
     private readonly bool _standing;
+    private readonly PlayerCharacter _character;
+    private Vector3 _walkingPosition;
+    private Quaternion _walkingHeading;
+    private readonly WalkingSway _walkingSway = new();
+    private int _swayFrame = -1;
     private Vector3 _upperArmPosition;
     private int _drawIndex;
     private bool _exiting;
@@ -57,6 +62,9 @@ internal sealed class CustomDraw
     internal CustomDraw(PlayerHandsAnimator hands, Transform eye, Transform cigarette, Quaternion bodyRotation, PlayerCharacter character, SmokingSession session, RaycastHit railTop, SmokeKind kind, bool standing = false)
     {
         _standing = standing;
+        _character = character;
+        _walkingPosition = character.transform.position;
+        _walkingHeading = bodyRotation;
         _session = session;
         _mask = kind == SmokeKind.Mask;
         _bodyOrigin = character.transform.position;
@@ -121,7 +129,7 @@ internal sealed class CustomDraw
             _upperArmPosition = upper.position;
             // Keep the native shoulder anchors and solve a short, bent-arm draw.
             // No lowered-arm transport, shoulder widening or axial-roll overrides.
-            _restPosition = eye.position + bodyRotation * new Vector3(0.07f, -0.32f, 0.28f);
+            _restPosition = eye.position + bodyRotation * new Vector3(0.07f, -0.32f, 0.252f);
             var palm = -(bodyRotation * Vector3.forward);
             if (_mask) palm = (palm + Vector3.up * 0.65f).normalized;
             _restRotation = Quaternion.LookRotation(bodyRotation * new Vector3(-1f, 0.15f, 0.45f), palm) * Quaternion.Inverse(handFrame);
@@ -292,11 +300,21 @@ internal sealed class CustomDraw
 
     private void FollowRail()
     {
-        if (_movingFrame == null) return;
-        var delta = _movingFrame.Advance();
+        if (_movingFrame == null && !_standing) return;
+        (Vector3 Before, Vector3 After, Quaternion Rotation) delta;
+        if (_standing)
+        {
+            var heading = _character.Controller.Rotation;
+            var position = _character.transform.position;
+            delta = (_walkingPosition, position, heading * Quaternion.Inverse(_walkingHeading));
+            _walkingPosition = position;
+            _walkingHeading = heading;
+        }
+        else delta = _movingFrame!.Advance();
         Vector3 Point(Vector3 p) => delta.After + delta.Rotation * (p - delta.Before);
         _bodyOrigin = Point(_bodyOrigin);
         _eyeAtStart = Point(_eyeAtStart);
+        _upperArmPosition = Point(_upperArmPosition);
         _shoulderPosition = Point(_shoulderPosition);
         _supportShoulderPosition = Point(_supportShoulderPosition);
         _restPosition = Point(_restPosition);
@@ -390,6 +408,14 @@ internal sealed class CustomDraw
     {
         FollowRail();
         if (_exiting) { EvaluateExit(); return; }
+        if (_standing && _swayFrame != Time.frameCount)
+        {
+            _swayFrame = Time.frameCount;
+            var velocity = _character.Controller.Velocity;
+            var speed = new Vector2(velocity.x, velocity.z).magnitude;
+            var nativeSwing = Quaternion.Inverse(_bodyRotation) * (_supportHand.position - _supportPosition);
+            _walkingSway.Update(new(nativeSwing.x, nativeSwing.y, nativeSwing.z), speed, Time.deltaTime);
+        }
         var elapsed = Clock - _start;
         var nextIndex = _drawIndex;
         while (nextIndex + 1 < _session.DrawStarts.Length && elapsed >= _session.DrawStarts[nextIndex + 1]) nextIndex++;
@@ -442,6 +468,11 @@ internal sealed class CustomDraw
         var position = _standing ? StandingHand(_restPosition, drawPosition, blend) : Vector3.Lerp(_restPosition, drawPosition, blend);
         // A small outward arc keeps the raising hand away from the chest.
         if (!_standing) position += _bodyRotation * new Vector3(0.045f * Mathf.Sin(blend * Mathf.PI), 0f, 0f);
+        if (_standing)
+        {
+            var sway = _walkingSway.Offset;
+            position += _bodyRotation * new Vector3(sway.X, sway.Y, sway.Z) * (1f - blend);
+        }
         var weight = Smooth((Clock - _start) / 0.6f);
         if (_shoulder != null)
         {

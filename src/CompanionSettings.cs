@@ -16,9 +16,9 @@ internal static class CompanionSettings
                 "Cigarettes, joints and inhalant masks."), config);
         var smoking = mod.AddCategory("Smoking", "Smoking");
         smoking.BindToggle("AllowSprintingWhileSmoking", "Allow sprinting while smoking", Plugin.AllowSprinting,
-            "Reserved for walking smoking. No effect yet; movement still ends the session.");
-        var hotkey = mod.Controls.AddInput("StandingSmoke", "Smoke while standing", "<Keyboard>/f8");
+            "Allow sprinting during free smoking. Off by default; walking remains available.");
+        var hotkey = mod.Controls.AddInput("StandingSmoke", "Start / stop smoking", "<Keyboard>/f8");
         Plugin.StandingSmokePressed = () => CompanionInput.WasPressed(hotkey);
-        mod.Controls.AddParagraph("SmokingControls", "With empty hands, left-click a railing to smoke there, or use Smoke while standing anywhere on foot. Standing smoking holds the item in front of your chest. Movement or Escape ends smoking.");
+        mod.Controls.AddParagraph("SmokingControls", "With empty hands, left-click a railing to smoke there, or use Start / stop smoking anywhere on foot. Walking and stopping keep the same session. Press the hotkey again or interact to end free smoking. Movement or Escape still ends railing smoking.");
     }
 }

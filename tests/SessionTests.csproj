@@ -12,6 +12,7 @@
     <Compile Include="../src/MaskSlowMotion.cs" Link="MaskSlowMotion.cs" />
     <Compile Include="../src/GripSurface.cs" Link="GripSurface.cs" />
     <Compile Include="../src/FingerFit.cs" Link="FingerFit.cs" />
+    <Compile Include="../src/WalkingSway.cs" Link="WalkingSway.cs" />
     <Compile Include="../src/HandMotion.cs" Link="HandMotion.cs" />
     <Compile Include="../src/SmokingSession.cs" Link="SmokingSession.cs" />
     <Compile Include="../src/HighSession.cs" Link="HighSession.cs" />

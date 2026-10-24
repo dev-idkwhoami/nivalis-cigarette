@@ -15,6 +15,9 @@ internal sealed class StanceControl
     private Vector3 _position;
     private Quaternion _rotation;
     private bool _placed;
+    private PlayerCharacter? _walkingCharacter;
+    private Vector3 _previousPosition;
+    private Quaternion _previousHeading;
     private MovingRailFrame? _movingFrame;
     internal bool FollowsMovingRail => _movingFrame != null;
 
@@ -31,10 +34,16 @@ internal sealed class StanceControl
         _horizontalRecentering = _pov.m_HorizontalRecentering;
     }
 
-    internal void Place(PlayerCharacter character)
+    internal void Place(PlayerCharacter character, bool walking = false)
     {
         // Rotation is the game's yaw-only body heading; camera pitch never participates.
         var heading = character.Controller.Rotation;
+        if (walking)
+        {
+            _walkingCharacter = character;
+            _previousPosition = character.transform.position;
+            _previousHeading = heading;
+        }
 
         // Let the game's own upright free-look placement retain its rig offsets and model axes.
         // Then freeze that world pose instead of tracking camera rotation every frame.
@@ -61,13 +70,16 @@ internal sealed class StanceControl
             _hands.targetRigOffset = targetOffset;
         }
 
-        var horizontal = _pov.m_HorizontalAxis;
-        var center = horizontal.Value + Mathf.DeltaAngle(horizontal.Value, heading.eulerAngles.y);
-        horizontal.m_MinValue = center - 65f;
-        horizontal.m_MaxValue = center + 65f;
-        horizontal.m_Wrap = false;
-        horizontal.Value = Mathf.Clamp(horizontal.Value, horizontal.m_MinValue, horizontal.m_MaxValue);
-        _pov.m_HorizontalAxis = horizontal;
+        if (!walking)
+        {
+            var horizontal = _pov.m_HorizontalAxis;
+            var center = horizontal.Value + Mathf.DeltaAngle(horizontal.Value, heading.eulerAngles.y);
+            horizontal.m_MinValue = center - 65f;
+            horizontal.m_MaxValue = center + 65f;
+            horizontal.m_Wrap = false;
+            horizontal.Value = Mathf.Clamp(horizontal.Value, horizontal.m_MinValue, horizontal.m_MaxValue);
+            _pov.m_HorizontalAxis = horizontal;
+        }
         var vertical = _pov.m_VerticalAxis;
         // Cinemachine POV positive pitch looks down. Keep upward movement, limit exposed shoulders.
         vertical.m_MinValue = Mathf.Max(_vertical.m_MinValue, -70f);
@@ -100,6 +112,16 @@ internal sealed class StanceControl
 
     internal void Apply()
     {
+        if (_walkingCharacter != null)
+        {
+            var position = _walkingCharacter.transform.position;
+            var heading = _walkingCharacter.Controller.Rotation;
+            var delta = heading * Quaternion.Inverse(_previousHeading);
+            _position = position + delta * (_position - _previousPosition);
+            _rotation = delta * _rotation;
+            _previousPosition = position;
+            _previousHeading = heading;
+        }
         if (_movingFrame != null)
         {
             var delta = _movingFrame.Advance();
@@ -118,6 +140,7 @@ internal sealed class StanceControl
     internal void Restore()
     {
         _placed = false;
+        _walkingCharacter = null;
         _movingFrame = null;
         if (_pov == null) return;
         // Preserve where the user is now looking, while restoring the previous input settings.

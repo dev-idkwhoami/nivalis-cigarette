@@ -31,6 +31,7 @@ public sealed class SmokingController : MonoBehaviour
     private RuntimeAnimatorController? _originalController;
     private AnimatorOverrideController? _override;
     private OverrideableBool.OverrideLock? _movementLock;
+    private OverrideableBool.OverrideLock? _sprintLock;
     private OverrideableBool.OverrideLock? _interactionLock;
     private GameObject? _cigarette;
     private readonly List<Material> _materials = new();
@@ -122,11 +123,17 @@ public sealed class SmokingController : MonoBehaviour
                 Stop(null, SmokingEndReason.SceneChanged);
                 return;
             }
-            if (_active && (!_exiting && (!GameplayAvailable() || (_kind == SmokeKind.Mask ? Time.unscaledTime : Time.time) - _started >= (_session?.Duration ?? 60f) ||
-                Gamepad.current?.leftStick.ReadValue().sqrMagnitude > 0.1f)))
-                BeginExit(!GameplayAvailable() ? SmokingEndReason.GameplayUnavailable :
+            if (_active && (!_exiting && ((!_standing && !GameplayAvailable()) || (_kind == SmokeKind.Mask ? Time.unscaledTime : Time.time) - _started >= (_session?.Duration ?? 60f) ||
+                (!_standing && Gamepad.current?.leftStick.ReadValue().sqrMagnitude > 0.1f))))
+                BeginExit(!_standing && !GameplayAvailable() ? SmokingEndReason.GameplayUnavailable :
                     (_kind == SmokeKind.Mask ? Time.unscaledTime : Time.time) - _started >= (_session?.Duration ?? 60f)
                         ? SmokingEndReason.Completed : SmokingEndReason.UserCancelled);
+            if (_active && _standing)
+            {
+                if (FreeSessionConflict()) { Stop(null); return; }
+                UpdateSprintLock();
+                if (!_exiting && Plugin.StandingSmokePressed()) { BeginExit(); return; }
+            }
             if (_exiting)
             {
                 if (!GameplayAvailable()) { _hud?.Restore(); _hud = null; }
@@ -138,7 +145,7 @@ public sealed class SmokingController : MonoBehaviour
                 }
                 return;
             }
-            if (_active && keyboard != null && (keyboard.escapeKey.wasPressedThisFrame ||
+            if (_active && !_standing && keyboard != null && (keyboard.escapeKey.wasPressedThisFrame ||
                 keyboard.wKey.isPressed || keyboard.aKey.isPressed || keyboard.sKey.isPressed || keyboard.dKey.isPressed ||
                 keyboard.upArrowKey.isPressed || keyboard.downArrowKey.isPressed || keyboard.leftArrowKey.isPressed ||
                 keyboard.rightArrowKey.isPressed || keyboard.spaceKey.isPressed))
@@ -356,20 +363,27 @@ public sealed class SmokingController : MonoBehaviour
         _maskEffect.Suspend();
         _exiting = false;
         _stance = new StanceControl(hands, character.Controller);
-        _stance.Place(character);
-        _movementLock = character.Controller.DisableMovement(this);
-        _interactionLock = character.Interaction.DisableInteractions(this);
-        character.Controller.StopMovement();
-        // Unity stripped both managed constructors; its native creation binding remains available.
-        _override = new AnimatorOverrideController(IL2CPP.il2cpp_object_new(Il2CppClassPointerStore<AnimatorOverrideController>.NativeClassPtr));
-        AnimatorOverrideController.Internal_Create(_override, _originalController);
-        _override[IdleClip] = clip;
-        animator.runtimeAnimatorController = _override;
-        animator.applyRootMotion = false;
-        animator.fireEvents = false; // NPC clip events must not invoke player interaction handlers.
-        animator.speed = 1f;
-        hands.rootMotion = false;
-        animator.SetFloat(PlayerHandsAnimator.Param.Speed, 0f);
+        _stance.Place(character, _standing);
+        if (_standing) UpdateSprintLock();
+        else
+        {
+            _movementLock = character.Controller.DisableMovement(this);
+            _interactionLock = character.Interaction.DisableInteractions(this);
+            character.Controller.StopMovement();
+        }
+        if (!_standing)
+        {
+            // Unity stripped both managed constructors; its native creation binding remains available.
+            _override = new AnimatorOverrideController(IL2CPP.il2cpp_object_new(Il2CppClassPointerStore<AnimatorOverrideController>.NativeClassPtr));
+            AnimatorOverrideController.Internal_Create(_override, _originalController);
+            _override[IdleClip] = clip;
+            animator.runtimeAnimatorController = _override;
+            animator.applyRootMotion = false;
+            animator.fireEvents = false; // NPC clip events must not invoke player interaction handlers.
+            animator.speed = 1f;
+            hands.rootMotion = false;
+            animator.SetFloat(PlayerHandsAnimator.Param.Speed, 0f);
+        }
         foreach (var entry in _renderers) entry.Renderer.enabled = true;
         _kind = kind;
         _blunt = kind == SmokeKind.Joint;
@@ -408,6 +422,48 @@ public sealed class SmokingController : MonoBehaviour
     }
 
     [HideFromIl2Cpp]
+    private void UpdateSprintLock()
+    {
+        if (Plugin.AllowSprinting.Value) Release(ref _sprintLock);
+        else if (_sprintLock == null) _sprintLock = PlayerManager._instance.LocalPlayer.Character.Controller.DisableSprint(this);
+    }
+
+    [HideFromIl2Cpp]
+    private bool FreeSessionConflict()
+    {
+        var character = PlayerManager._instance?.LocalPlayer?.Character;
+        var hands = _hands;
+        return character == null || hands == null || character.DrivenBoat != null ||
+            character.ObjectHolder.IsHoldingObject || !character.CanEquipItem ||
+            hands.IsSitting || hands.IsPlayingMealAnimation || hands.sleeping || hands.placingItem ||
+            hands.IsHoldingTray || hands.Snapped || hands.Animator.GetBool(PlayerHandsAnimator.Param.Fishing) ||
+            hands.Animator.GetCurrentAnimatorStateInfo(0).fullPathHash != Animator.StringToHash(IdleState);
+    }
+
+    [HideFromIl2Cpp]
+    internal bool UsesNativeHands(PlayerHandsAnimator hands) => _standing && Owns(hands);
+
+    [HideFromIl2Cpp]
+    internal void AfterNativeHands(PlayerHandsAnimator hands)
+    {
+        if (!UsesNativeHands(hands)) return;
+        try
+        {
+            if (FreeSessionConflict()) { Stop(null); return; }
+            if (!GameplayAvailable()) return;
+            Evaluate(hands);
+        }
+        catch (Exception e) { Plugin.Logger.LogError(e); Stop("Smoking animation failed; controls restored."); }
+    }
+
+    [HideFromIl2Cpp]
+    internal void BeforeInteraction(PlayerInteraction interaction)
+    {
+        if (_active && _standing && PlayerManager._instance?.LocalPlayer?.Character?.Interaction == interaction)
+            Stop(null);
+    }
+
+    [HideFromIl2Cpp]
     internal bool Owns(PlayerHandsAnimator hands) => _hands != null && _hands == hands;
 
     [HideFromIl2Cpp]
@@ -418,10 +474,13 @@ public sealed class SmokingController : MonoBehaviour
     [HideFromIl2Cpp]
     internal void Evaluate(PlayerHandsAnimator hands)
     {
-        // The game manually evaluates this disabled Animator. Replace only its active smoking update.
+        // Rail sessions sample a fixed base; free sessions retain native locomotion and overlay the smoking arm.
         var animator = hands.Animator;
-        animator.Play(IdleState, 0, 0f);
-        animator.Update(0f);
+        if (!_standing || _customDraw == null)
+        {
+            animator.Play(IdleState, 0, 0f);
+            animator.Update(0f);
+        }
         animator.transform.localPosition = _animatorPosition;
         animator.transform.localRotation = _animatorRotation;
         _stance?.Apply();
@@ -443,7 +502,7 @@ public sealed class SmokingController : MonoBehaviour
     public void LateUpdate()
     {
         // Keep the world pose even if a camera-following ancestor moved after ManualUpdate.
-        if (!_active) return;
+        if (!_active || (_standing && !GameplayAvailable())) return;
         try
         {
             if (_hands != null) Evaluate(_hands);
@@ -557,7 +616,7 @@ public sealed class SmokingController : MonoBehaviour
         _customDraw = null;
         try
         {
-            if (hands != null && hands.Animator != null && _originalController != null)
+            if (!_standing && hands != null && hands.Animator != null && _originalController != null)
             {
                 var animator = hands.Animator;
                 animator.runtimeAnimatorController = _originalController;
@@ -586,6 +645,7 @@ public sealed class SmokingController : MonoBehaviour
             try { _hud?.Restore(); }
             catch (Exception e) { Plugin.Logger.LogError("Restoring HUD: " + e); }
             _hud = null;
+            Release(ref _sprintLock);
             Release(ref _movementLock);
             Release(ref _interactionLock);
             foreach (var entry in _renderers)
@@ -702,7 +762,7 @@ internal static class HandsUpdatePatch
     private static bool Prefix(PlayerHandsAnimator __instance)
     {
         var smoking = SmokingController.Instance;
-        if (smoking == null || !smoking.Owns(__instance)) return true;
+        if (smoking == null || !smoking.Owns(__instance) || smoking.UsesNativeHands(__instance)) return true;
         try { smoking.Evaluate(__instance); return false; }
         catch (Exception e)
         {
@@ -711,6 +771,9 @@ internal static class HandsUpdatePatch
             return true;
         }
     }
+    [HarmonyPostfix]
+    private static void Postfix(PlayerHandsAnimator __instance) => SmokingController.Instance?.AfterNativeHands(__instance);
+
 }
 
 [HarmonyPatch(typeof(PlayerHandsAnimator), nameof(PlayerHandsAnimator.UpdateIK), new Type[] { })]
@@ -718,4 +781,16 @@ internal static class HandsIkPatch
 {
     [HarmonyPrefix]
     private static bool Prefix(PlayerHandsAnimator __instance) => SmokingController.Instance?.Owns(__instance) != true;
+}
+
+[HarmonyPatch(typeof(PlayerInteraction), nameof(PlayerInteraction.OnInteraction))]
+internal static class SmokingInteractionPatch
+{
+    [HarmonyPrefix]
+    private static void Prefix(PlayerInteraction __instance)
+    {
+        // Native OnInteraction does not inspect callback phase; mirror its gates.
+        if (__instance.CanInteract && __instance.CurrentFocus != null && !CursorModeManager.IsCursorActive)
+            SmokingController.Instance?.BeforeInteraction(__instance);
+    }
 }
