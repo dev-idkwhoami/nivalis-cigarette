@@ -776,9 +776,12 @@ internal static class HandsUpdatePatch
         if (smoking == null || !smoking.Owns(__instance)) return true;
         if (smoking.UsesNativeHands(__instance))
         {
+            // Use actual sprint state, not the input key or permission setting.
+            // Leave the snapshot empty so the finalizer also leaves sprint playback alone.
+            if (__instance.character?.Controller?._isSprinting == true) return true;
             var animator = __instance.Animator;
             __state = new PlaybackSnapshot { Animator = animator, Speed = animator.speed };
-            // Only the native hands evaluation runs at half tempo. Character
+            // Only non-sprinting native hands evaluation runs at half tempo. Character
             // velocity, input, physics, smoking timing and world time are untouched.
             animator.speed = __state.Speed * 0.5f;
             return true;
