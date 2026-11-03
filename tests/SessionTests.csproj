@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <DefineConstants>$(DefineConstants);CIGARETTE_API</DefineConstants>
     <TargetFramework>net8.0</TargetFramework>
     <OutputPath>bin/</OutputPath>
   </PropertyGroup>
@@ -12,6 +13,9 @@
     <Compile Include="../src/MaskSlowMotion.cs" Link="MaskSlowMotion.cs" />
     <Compile Include="../src/GripSurface.cs" Link="GripSurface.cs" />
     <Compile Include="../src/FingerFit.cs" Link="FingerFit.cs" />
+    <Compile Include="../src/SmokeKind.cs" Link="SmokeKind.cs" />
+    <Compile Include="../src/SmokingSelection.cs" Link="SmokingSelection.cs" />
+    <Compile Include="../src/SelectionGesture.cs" Link="SelectionGesture.cs" />
     <Compile Include="../src/WalkingSway.cs" Link="WalkingSway.cs" />
     <Compile Include="../src/HandMotion.cs" Link="HandMotion.cs" />
     <Compile Include="../src/SmokingSession.cs" Link="SmokingSession.cs" />

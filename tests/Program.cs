@@ -6,6 +6,7 @@ if (args.Length == 5 && args[0] == "--check-archive")
 }
 ApiChecks.Run();
 WalkingSwayChecks.Run();
+SelectionChecks.Run();
 // Time ownership must restore non-default speed and preserve an external pause.
 var slow = new MaskSlowMotion();
 var slowTime = slow.Apply(0.8f, 0.02f, 1f, 0.35f);

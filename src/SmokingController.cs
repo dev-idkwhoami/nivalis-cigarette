@@ -53,6 +53,12 @@ public sealed class SmokingController : MonoBehaviour
     private bool _blunt;
     private SmokeKind _kind;
     private readonly SmokingWheel _wheel = new();
+    private readonly SelectionGesture _selectionGesture = new();
+    private readonly SelectionGesture _stopGesture = new();
+    private bool _selectionStanding;
+    private PlayerCharacter? _selectionCharacter;
+    private Collider? _selectionRail;
+    private int _selectionScene;
     private JointModel? _joint;
     private readonly CannabisEffects _high = new();
     private readonly MaskAfterEffect _maskEffect = new();
@@ -78,6 +84,8 @@ public sealed class SmokingController : MonoBehaviour
             _high.Tick(GameplayAvailable(), _active && _blunt, _active);
             for (var i = _drops.Count - 1; i >= 0; i--)
                 if (!_drops[i].Tick()) { _drops[i].Dispose(); _drops.RemoveAt(i); }
+            if (_active || _approach != null || _wheel.Busy) _selectionGesture.Cancel();
+            if (!_active || !_standing || _exiting || !Application.isFocused || !GameplayAvailable()) _stopGesture.Cancel();
             var keyboard = Keyboard.current;
             if (_approach != null)
             {
@@ -132,7 +140,9 @@ public sealed class SmokingController : MonoBehaviour
             {
                 if (FreeSessionConflict()) { Stop(null); return; }
                 UpdateSprintLock();
-                if (!_exiting && Plugin.StandingSmokePressed()) { BeginExit(); return; }
+                if (_stopGesture.StopRequested(Time.unscaledTime, Plugin.StandingSmokePressed(), Plugin.StandingSmokeHeld(),
+                    !_exiting && Application.isFocused && GameplayAvailable(), Plugin.SelectionMode.Value == "Dynamic",
+                    Plugin.SelectionHoldSeconds.Value)) { BeginExit(); return; }
             }
             if (_exiting)
             {
@@ -153,9 +163,9 @@ public sealed class SmokingController : MonoBehaviour
                 BeginExit();
                 return;
             }
-            if (!GameplayAvailable()) return;
-            if (!_active && Plugin.StandingSmokePressed() && CanStartSmoking(true)) { _wheel.Open(true); return; }
-            if (!_active && Mouse.current?.leftButton.wasPressedThisFrame == true && CanSmokeAtRail()) _wheel.Open();
+            if (!GameplayAvailable() || !Application.isFocused || _active)
+            { _selectionGesture.Cancel(); return; }
+            PollSelection();
         }
         catch (Exception e)
         {
@@ -166,6 +176,34 @@ public sealed class SmokingController : MonoBehaviour
 #if CIGARETTE_API
         finally { Plugin.Api.DispatchEvents(); }
 #endif
+    }
+
+    [HideFromIl2Cpp]
+    private void PollSelection()
+    {
+        var dynamic = Plugin.SelectionMode.Value == "Dynamic";
+        if (!dynamic) _selectionGesture.Cancel();
+        if (!_selectionGesture.Pending)
+        {
+            var standing = Plugin.StandingSmokePressed() && CanStartSmoking(true);
+            if (!standing && !(Mouse.current?.leftButton.wasPressedThisFrame == true && CanSmokeAtRail())) return;
+            if (!dynamic) { _wheel.Open(standing); return; }
+            _selectionStanding = standing;
+            _selectionCharacter = PlayerManager._instance?.LocalPlayer?.Character;
+            _selectionScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle;
+            _selectionRail = null;
+            if (!standing && RailingTarget.TryCandidate(_selectionCharacter!, out var hit, out _)) _selectionRail = hit.collider;
+            _selectionGesture.Begin(Time.unscaledTime);
+        }
+        var valid = CanStartSmoking(_selectionStanding) &&
+            PlayerManager._instance?.LocalPlayer?.Character == _selectionCharacter &&
+            UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle == _selectionScene;
+        if (valid && !_selectionStanding)
+            valid = RailingTarget.TryCandidate(_selectionCharacter!, out var hit, out _) && hit.collider == _selectionRail;
+        var held = _selectionStanding ? Plugin.StandingSmokeHeld() : Mouse.current?.leftButton.isPressed == true;
+        var result = _selectionGesture.Tick(Time.unscaledTime, held, valid, Plugin.SelectionHoldSeconds.Value);
+        if (result != SelectionDecision.None)
+            _wheel.Open(_selectionStanding, quick: result == SelectionDecision.Tap, forceWheel: result == SelectionDecision.Hold);
     }
 
 #if CIGARETTE_API
@@ -420,6 +458,7 @@ public sealed class SmokingController : MonoBehaviour
             _hud = new SmokingHud();
             _hud.Hide();
         }
+        Plugin.LastUsedItem.Value = (int)kind;
         Plugin.Logger.LogInfo($"Smoking session started: {_kind}, {(_standing ? "chest pose" : "railing")}, {_session.Duration} seconds.");
 #if CIGARETTE_API
         Plugin.Api.Started();
@@ -737,6 +776,8 @@ public sealed class SmokingController : MonoBehaviour
 
     public void OnDisable()
     {
+        _selectionGesture.Cancel();
+        _stopGesture.Cancel();
         RailPrompt.Release(); Stop(null, SmokingEndReason.ControllerDisabled);
 #if CIGARETTE_API
         Plugin.Api.ClearDirectEffects();

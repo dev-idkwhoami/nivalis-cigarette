@@ -15,7 +15,7 @@ namespace NivalisMods.Cigarette;
 [BepInPlugin(Id, "Cigarette", Version)]
 public sealed class Plugin : BasePlugin
 {
-    public const string Version = "1.4.0";
+    public const string Version = "1.5.0";
     public const string Id = "local.nivalis.cigarette";
     internal static ManualLogSource Logger = null!;
 #if CIGARETTE_API
@@ -54,6 +54,10 @@ public sealed class Plugin : BasePlugin
     }
 
     internal static ConfigEntry<bool> AllowSprinting = null!;
+    internal static ConfigEntry<string> SelectionMode = null!;
+    internal static ConfigEntry<float> SelectionHoldSeconds = null!;
+    internal static ConfigEntry<int> LastUsedItem = null!;
+    internal static Func<bool> StandingSmokeHeld = () => false;
     internal static Func<bool> StandingSmokePressed = () => false;
 
     internal static ConfigEntry<float> MouthHeight = null!;
@@ -70,6 +74,9 @@ public sealed class Plugin : BasePlugin
             settings.Bind("General", "EnableCannabis", true, "Offer cannabis when starting smoking."),
             settings.Bind("General", "EnableInhalantMask", true, "Offer the inhalant mask when starting smoking.")
         };
+        SelectionMode = settings.Bind("General", "SelectionMode", "Classic", "Classic opens the wheel; Dynamic taps use the last available item and holds open the wheel.");
+        SelectionHoldSeconds = settings.Bind("General", "SelectionHoldSeconds", 0.25f, "Dynamic wheel hold duration in seconds (0.1–2).");
+        LastUsedItem = settings.Bind("Selection", "LastUsedItem", -1, "Last successfully used smoking item; -1 uses the first available item.");
         AllowSprinting = settings.Bind("Smoking", "AllowSprintingWhileSmoking", false, "Allow sprinting during free smoking. Walking is always allowed; off by default.");
         InhaleVolume = settings.Bind("Audio", "InhaleVolume", DefaultInhaleVolume, "Inhale sound volume (0–1); 0 mutes inhaling.");
         ExhaleVolume = settings.Bind("Audio", "ExhaleVolume", DefaultExhaleVolume, "Exhale sound volume (0–1); 0 mutes exhaling.");

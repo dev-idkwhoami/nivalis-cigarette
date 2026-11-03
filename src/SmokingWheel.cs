@@ -29,7 +29,7 @@ internal sealed class SmokingWheel
 
     internal bool Standing => _standing;
 
-    internal void Open(bool standing = false)
+    internal void Open(bool standing = false, bool quick = false, bool forceWheel = false)
     {
         var wheel = RadialMenuUI.instance;
         var character = PlayerManager._instance?.LocalPlayer?.Character;
@@ -41,9 +41,9 @@ internal sealed class SmokingWheel
         _scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle;
         var available = Enum.GetValues<SmokeKind>().Where(Plugin.ItemAvailable).ToArray();
         if (available.Length == 0) return;
-        if (available.Length == 1)
+        if (quick || (available.Length == 1 && !forceWheel))
         {
-            _choice = available[0];
+            _choice = quick ? SmokingSelection.Choose((SmokeKind)Plugin.LastUsedItem.Value, available) : available[0];
             _choiceFrame = Time.frameCount;
             _deadline = Time.unscaledTime + 2f;
             RailPrompt.Release();
