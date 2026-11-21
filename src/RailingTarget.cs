@@ -71,7 +71,7 @@ internal static class RailingTarget
         if (!RailSurface.Raycast(new Vector3(point.x, baseY + 1.65f, point.z), Vector3.down,
             out var top, 1.0f, hands.environmentLayer, QueryTriggerInteraction.Ignore)) return false;
         if (top.collider != collider) { reason = "Top surface belongs to a different collider"; return false; }
-        if (top.normal.y <= 0.85f) { reason = "Top surface is too steep"; return false; }
+        if (top.normal.y <= RailContactGeometry.MinimumNormalY) { reason = "Top surface is too steep"; return false; }
         if (top.point.y - baseY > 1.4f) { reason = "Top is above the 1.4 m height limit"; return false; }
         reason = "Beyond maximum horizontal activation distance";
         if (Vector3.ProjectOnPlane(top.point - character.transform.position, Vector3.up).magnitude > maximum) return false;

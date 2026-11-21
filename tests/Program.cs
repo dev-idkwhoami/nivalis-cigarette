@@ -4,6 +4,7 @@ if (args.Length == 5 && args[0] == "--check-archive")
     ArchiveChecks.Run(args[1], args[2], args[3], args[4]);
     return;
 }
+RailContactChecks.Run();
 ApiChecks.Run();
 WalkingSwayChecks.Run();
 SelectionChecks.Run();

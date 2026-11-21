@@ -74,3 +74,14 @@ Deployment requires a clean checkout, builds both archives, creates a missing ve
 | `tools/` | Build, installation and release helpers |
 
 See [local railing development](docs/rail-development.md) for unsupported-surface tooling. Development mods are excluded from release archives.
+
+## Sloped railing contacts
+
+Hand probes follow the verified railing slope instead of assuming both hands
+are at the aimed centre's height. This fixes the probe gap around 20 degrees on
+otherwise supported slopes. The existing roughly 32-degree top-surface limit,
+physical surface checks, hand reach and collision checks remain in place.
+Failed hand placement logs distinguish a missed surface, another collider,
+height/slope rejection and an unreachable arm pose. Known issue: some winter railings near snow still fail hand placement when
+another collider obstructs the probes. This change does not bypass collision or
+enlarge player reach. Managed geometry checks do not verify the rendered hand pose.

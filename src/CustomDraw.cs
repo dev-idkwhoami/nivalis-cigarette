@@ -571,15 +571,20 @@ internal sealed class CustomDraw
         var forward = body * Vector3.forward;
         var railDepth = Vector3.Dot(railTop.point - character.transform.position, forward);
         var samples = new List<(float Depth, Vector3 Point)>();
+        var noHit = 0; var otherCollider = 0; var tooSteep = 0; var wrongHeight = 0;
         bool Probe(float depth, out Vector3 point)
         {
             point = default;
             var origin = character.transform.position + body * new Vector3(side, 0f, depth);
-            origin.y = railTop.point.y + 0.08f;
-            if (!RailSurface.Raycast(origin, Vector3.down, out var hit, 0.16f, hands.environmentLayer, QueryTriggerInteraction.Ignore)) return false;
-            if (hit.collider != railTop.collider || hit.normal.y < 0.85f) return false;
+            var normal = railTop.normal;
+            origin.y = RailContactGeometry.ProbeHeight(railTop.point.y, normal.x, normal.y, normal.z,
+                origin.x - railTop.point.x, origin.z - railTop.point.z) + RailContactGeometry.ProbeHalfHeight;
+            if (!RailSurface.Raycast(origin, Vector3.down, out var hit, RailContactGeometry.ProbeHalfHeight * 2f,
+                hands.environmentLayer, QueryTriggerInteraction.Ignore)) { noHit++; return false; }
+            if (hit.collider != railTop.collider) { otherCollider++; return false; }
+            if (hit.normal.y < RailContactGeometry.MinimumNormalY) { tooSteep++; return false; }
             var height = hit.point.y - character.transform.position.y;
-            if (height < 0.65f || height > 1.4f) return false;
+            if (height < 0.65f || height > 1.4f) { wrongHeight++; return false; }
             point = hit.point;
             return true;
         }
@@ -590,7 +595,13 @@ internal sealed class CustomDraw
             var depth = sample < 0 ? railDepth : 0.15f + sample * 0.01f;
             if (depth >= 0.1f && depth <= 0.75f && Probe(depth, out var point)) samples.Add((depth, point));
         }
-        if (samples.Count == 0) return false;
+        if (samples.Count == 0)
+        {
+            Plugin.Logger.LogWarning($"Rail hand probe failed: scene={railTop.collider.gameObject.scene.name}, rail={railTop.collider.name}, " +
+                $"side={side:F2}, slope={Vector3.Angle(railTop.normal, Vector3.up):F1} degrees, contact={railTop.point}, " +
+                $"miss={noHit}, otherCollider={otherCollider}, steep={tooSteep}, height={wrongHeight}.");
+            return false;
+        }
         samples.Sort((a, b) => a.Depth.CompareTo(b.Depth));
         var anchor = 0;
         for (var i = 1; i < samples.Count; i++)
@@ -632,6 +643,9 @@ internal sealed class CustomDraw
             bestScore = score;
             found = true;
         }
+        if (!found)
+            Plugin.Logger.LogWarning($"Rail hand reach failed: scene={railTop.collider.gameObject.scene.name}, rail={railTop.collider.name}, " +
+                $"side={side:F2}, slope={Vector3.Angle(railTop.normal, Vector3.up):F1} degrees, span={front:F3}..{back:F3} m, samples={samples.Count}.");
 #if CONTACT_DIAGNOSTICS
         Plugin.Logger.LogInfo($"[RailContact] side={side:F2}, selected={found}, scene={railTop.collider.gameObject.scene.name}, collider={railTop.collider.name}, span={front:F4}..{back:F4}, preferred={preferred:F4}, contact={contact.ToString("F4")}; reach: {arm.DescribeReach(contact + wristOffset)}");
 #endif
